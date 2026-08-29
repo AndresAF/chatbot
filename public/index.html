@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Consultorio — Asistente de citas</title>
+<style>
+  :root {
+    --ink: #16221f;
+    --paper: #f6f4ee;
+    --panel: #ffffff;
+    --line: #dedad0;
+    --teal: #2f5d55;
+    --teal-deep: #1d3b35;
+    --gold: #b8912f;
+    --confirmada: #2f6b46;
+    --cancelada: #a3402f;
+    --muted: #7a7568;
+    --bubble-in: #eef1ec;
+    --bubble-out: #dcebe6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Inter", "Segoe UI", sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+  }
+  header {
+    padding: 22px 28px 18px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  header .brand {
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--teal);
+    font-weight: 700;
+  }
+  header h1 {
+    margin: 2px 0 0;
+    font-size: 21px;
+    font-weight: 650;
+  }
+  header .sub {
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0;
+    min-height: calc(100vh - 78px);
+  }
+  @media (max-width: 1200px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+  .bubble.paciente {
+    align-self: flex-end;
+    background: #d7e8f5;
+    border-bottom-right-radius: 3px;
+  }
+  .col {
+    padding: 24px;
+  }
+  .col + .col {
+    border-left: 1px solid var(--line);
+  }
+  @media (max-width: 860px) {
+    .col + .col { border-left: none; border-top: 1px solid var(--line); }
+  }
+  .col h2 {
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 14px;
+    font-weight: 650;
+  }
+  .cita-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .cita-card .info .paciente {
+    font-weight: 600;
+    font-size: 15px;
+  }
+  .cita-card .info .detalle {
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .estado {
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-weight: 700;
+    padding: 4px 9px;
+    border-radius: 999px;
+  }
+  .estado.confirmada { color: var(--confirmada); background: #e3f0e7; }
+  .estado.cancelada { color: var(--cancelada); background: #f5e4df; text-decoration: line-through; }
+
+  .btn {
+    border: none;
+    background: var(--teal);
+    color: white;
+    font-size: 13px;
+    padding: 10px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .btn:hover { background: var(--teal-deep); }
+  .btn.ghost {
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--ink);
+  }
+  .toolbar { margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap; }
+
+  .chat-window {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    height: 420px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .chat-header {
+    padding: 12px 16px;
+    background: var(--teal-deep);
+    color: white;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .chat-messages {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .bubble {
+    max-width: 80%;
+    padding: 9px 13px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+  }
+  .bubble.recep {
+    align-self: flex-end;
+    background: var(--bubble-out);
+    border-bottom-right-radius: 3px;
+  }
+  .bubble.sistema {
+    align-self: flex-start;
+    background: var(--bubble-in);
+    border-bottom-left-radius: 3px;
+  }
+  .chat-input {
+    display: flex;
+    border-top: 1px solid var(--line);
+  }
+  .chat-input input {
+    flex: 1;
+    border: none;
+    padding: 12px 14px;
+    font-size: 14px;
+    outline: none;
+    background: transparent;
+  }
+  .chat-input button {
+    border: none;
+    background: var(--teal);
+    color: white;
+    padding: 0 18px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .hint {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+  .hint code {
+    background: #eee9dd;
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  .log {
+    margin-top: 18px;
+  }
+  .log h3 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .wa-msg {
+    background: #dcf8c6;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    margin-bottom: 6px;
+    max-width: 90%;
+  }
+  .wa-msg .to { font-size: 11px; color: #4a7a3a; font-weight: 700; margin-bottom: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="brand">Prima Websites — Prototipo</div>
+    <h1>Asistente de citas para consultorio</h1>
+    <div class="sub">Agenda por WhatsApp + control interno para recepción</div>
+  </div>
+</header>
+
+<div class="layout">
+
+  <div class="col">
+    <h2>Agenda del consultorio</h2>
+    <div id="citas-list"></div>
+
+    <div class="toolbar">
+      <button class="btn" id="btn-recordatorios">Enviar recordatorios a todos</button>
+      <button class="btn ghost" id="btn-refrescar">Actualizar</button>
+    </div>
+
+    <div class="log">
+      <h3>Mensajes simulados enviados al paciente (WhatsApp)</h3>
+      <div id="wa-log"></div>
+    </div>
+  </div>
+
+  <div class="col">
+    <h2>Chat de paciente (simulado, por WhatsApp)</h2>
+    <div class="chat-window">
+      <div class="chat-header">Paciente de prueba ↔ Consultorio</div>
+      <div class="chat-messages" id="paciente-messages"></div>
+      <div class="chat-input">
+        <input id="paciente-input" type="text" placeholder='Escribe "cita" para empezar' />
+        <button id="paciente-send">Enviar</button>
+      </div>
+    </div>
+    <div class="hint">
+      Simula ser un paciente nuevo. Escribe <code>cita</code> y sigue el flujo:
+      día → hora disponible → nombre → confirmación. Al confirmar, la cita
+      se guarda de verdad y aparece en la agenda de la izquierda.
+    </div>
+  </div>
+
+  <div class="col">
+    <h2>Chat interno — Recepción</h2>
+    <div class="chat-window">
+      <div class="chat-header">Tú (recepción) ↔ Asistente del consultorio</div>
+      <div class="chat-messages" id="chat-messages"></div>
+      <div class="chat-input">
+        <input id="chat-input" type="text" placeholder="Escribe un comando, ej: cancela la cita de María López" />
+        <button id="chat-send">Enviar</button>
+      </div>
+    </div>
+    <div class="hint">
+      Prueba comandos como:<br/>
+      <code>cancela la cita de María López</code><br/>
+      <code>cambia la cita de Juan Pérez al viernes 5pm</code><br/>
+      <code>envía recordatorio a Juan Ramírez</code><br/>
+      El asistente pide confirmación (sí/no) antes de tocar la agenda real.
+    </div>
+  </div>
+
+</div>
+
+<script>
+const citasList = document.getElementById('citas-list');
+const waLog = document.getElementById('wa-log');
+const chatMessages = document.getElementById('chat-messages');
+const chatInput = document.getElementById('chat-input');
+
+function addBubble(text, from) {
+  const b = document.createElement('div');
+  b.className = 'bubble ' + (from === 'recep' ? 'recep' : 'sistema');
+  b.textContent = text;
+  chatMessages.appendChild(b);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+async function cargarCitas() {
+  const res = await fetch('/api/citas');
+  const citas = await res.json();
+  citasList.innerHTML = '';
+  citas.forEach(c => {
+    const card = document.createElement('div');
+    card.className = 'cita-card';
+    card.innerHTML = `
+      <div class="info">
+        <div class="paciente">${c.paciente}</div>
+        <div class="detalle">${c.dia} · ${c.hora}</div>
+      </div>
+      <div class="estado ${c.estado}">${c.estado}</div>
+    `;
+    citasList.appendChild(card);
+  });
+}
+
+async function enviarComando() {
+  const mensaje = chatInput.value.trim();
+  if (!mensaje) return;
+  addBubble(mensaje, 'recep');
+  chatInput.value = '';
+
+  const res = await fetch('/api/simular-recepcion', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mensaje })
+  });
+  const data = await res.json();
+  addBubble(data.respuesta, 'sistema');
+  cargarCitas();
+}
+
+document.getElementById('chat-send').addEventListener('click', enviarComando);
+chatInput.addEventListener('keydown', e => { if (e.key === 'Enter') enviarComando(); });
+
+// ---- Chat de paciente simulado ----
+const pacienteMessages = document.getElementById('paciente-messages');
+const pacienteInput = document.getElementById('paciente-input');
+const TELEFONO_PACIENTE_PRUEBA = '+525599999999';
+
+function addBurbujaPaciente(text, from) {
+  const b = document.createElement('div');
+  b.className = 'bubble ' + (from === 'paciente' ? 'paciente' : 'sistema');
+  b.textContent = text;
+  pacienteMessages.appendChild(b);
+  pacienteMessages.scrollTop = pacienteMessages.scrollHeight;
+}
+
+async function enviarMensajePaciente() {
+  const mensaje = pacienteInput.value.trim();
+  if (!mensaje) return;
+  addBurbujaPaciente(mensaje, 'paciente');
+  pacienteInput.value = '';
+
+  const res = await fetch('/api/simular-paciente', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mensaje, telefono: TELEFONO_PACIENTE_PRUEBA })
+  });
+  const data = await res.json();
+  addBurbujaPaciente(data.respuesta, 'sistema');
+  cargarCitas();
+}
+
+document.getElementById('paciente-send').addEventListener('click', enviarMensajePaciente);
+pacienteInput.addEventListener('keydown', e => { if (e.key === 'Enter') enviarMensajePaciente(); });
+
+addBurbujaPaciente('Escribe "cita" para simular que eres un paciente nuevo agendando por WhatsApp.', 'sistema');
+
+document.getElementById('btn-refrescar').addEventListener('click', cargarCitas);
+
+document.getElementById('btn-recordatorios').addEventListener('click', async () => {
+  const res = await fetch('/api/enviar-recordatorios', { method: 'POST' });
+  const data = await res.json();
+  data.resultados.forEach(r => {
+    const d = document.createElement('div');
+    d.className = 'wa-msg';
+    d.innerHTML = `<div class="to">Para: ${r.paciente}</div>Te recordamos tu cita. ¡Te esperamos!`;
+    waLog.prepend(d);
+  });
+});
+
+addBubble('Hola, soy el asistente del consultorio. Escribe un comando para gestionar una cita.', 'sistema');
+cargarCitas();
+</script>
+
+</body>
+</html>
