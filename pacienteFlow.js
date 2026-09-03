@@ -24,7 +24,7 @@ async function manejarMensajePaciente(from, textoOriginal) {
       estados[from] = { paso: "PIDIENDO_DIA" };
       const sugerencias = db.proximosDiasConDisponibilidad(3);
       if (sugerencias.length === 0) {
-        return "Por ahora no tenemos horarios disponibles próximamente. Un miembro del consultorio te contactará pronto.";
+        return "Por ahora no tenemos horarios disponibles próximamente. En breve nos pondremos en contacto contigo.";
       }
       return `¡Hola! Con gusto te agendamos. ¿Qué día te gustaría venir? (ej. "mañana", "jueves", "15 de septiembre")\n\nAlgunos días con espacio:\n${listaDisponibilidad(sugerencias)}`;
     }
@@ -39,7 +39,7 @@ async function manejarMensajePaciente(from, textoOriginal) {
     }
     const { abierto, slots } = db.disponibilidad(fecha);
     if (!abierto) {
-      return "Ese día el consultorio está cerrado. ¿Qué otro día te acomoda?";
+      return "Ese día no tenemos servicio. ¿Qué otro día te acomoda?";
     }
     if (slots.length === 0) {
       const alt = db.proximosDiasConDisponibilidad(3, new Date(fecha + "T00:00:00"));
@@ -75,7 +75,7 @@ async function manejarMensajePaciente(from, textoOriginal) {
       // Doble check de disponibilidad (por si alguien más la tomó mientras tanto)
       if (!db.horaEstaDisponible(estado.fecha, estado.hora)) {
         reset(from);
-        return "Uy, justo se ocupó ese horario mientras confirmábamos. Escribe \"cita\" para ver los horarios disponibles de nuevo.";
+        return "Justo se ocupó ese horario mientras confirmábamos. Escribe \"cita\" para ver los horarios disponibles de nuevo.";
       }
       const telefono = from.replace("whatsapp:", "");
       db.crearCita({ paciente: estado.nombre, telefono, fecha: estado.fecha, hora: estado.hora });
