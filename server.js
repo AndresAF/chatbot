@@ -191,6 +191,30 @@ app.post("/api/enviar-recordatorios", async (req, res) => {
   res.json({ resultados });
 });
 
+// Descarga un respaldo consistente de la base de datos (protegido por token).
+// Uso: GET /api/backup?token=TU_BACKUP_TOKEN
+app.get("/api/backup", async (req, res) => {
+  const BACKUP_TOKEN = process.env.BACKUP_TOKEN;
+  if (!BACKUP_TOKEN || req.query.token !== BACKUP_TOKEN) {
+    return res.status(401).json({ error: "No autorizado" });
+  }
+
+  const os = require("os");
+  const path = require("path");
+  const fs = require("fs");
+  const destino = path.join(os.tmpdir(), `respaldo-${Date.now()}.db`);
+
+  try {
+    await db.backup(destino);
+    res.download(destino, "consultorio-respaldo.db", () => {
+      fs.unlink(destino, () => {});
+    });
+  } catch (err) {
+    console.error("Error generando respaldo:", err);
+    res.status(500).json({ error: "No se pudo generar el respaldo" });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
   console.log(twilioClient ? "Twilio conectado (modo real)" : "Twilio NO configurado -> modo SIMULADO (revisa .env)");

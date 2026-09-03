@@ -194,10 +194,16 @@ function citasParaRecordatorio(horasAntes = 24) {
   });
 }
 
+// Genera una copia consistente del archivo SQLite (usa la API de backup
+// online, así no se corta a medias por el modo WAL) en la ruta indicada.
+function backup(destino) {
+  return db.backup(destino);
+}
+
 module.exports = {
   listarCitas, listarActivas, buscarPorNombre, obtenerCita,
   cancelarCita, reagendarCita, crearCita, marcarRecordatorioEnviado,
   getConfigDia, actualizarConfigDia, listarConfigHorario,
   disponibilidad, horaEstaDisponible, proximosDiasConDisponibilidad,
-  citasParaRecordatorio,
+  citasParaRecordatorio, backup,
 };
