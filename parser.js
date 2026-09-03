@@ -13,7 +13,7 @@ function limpiar(texto) {
 
 function extraerNombre(texto) {
   // busca lo que sigue a "de" o "a" hasta encontrar una palabra de tiempo/día o el final
-  const match = texto.match(/\b(?:de|a)\s+([a-zA-Z\s]+?)(\s+(al|a las|el|para|hoy|manana|mañana|lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b|$)/i);
+  const match = texto.match(/\b(?:de|a)\s+([a-zA-Z0-9\s]+?)(\s+(al|a las|el|para|hoy|manana|mañana|lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b|$)/i);
   return match ? match[1].trim() : null;
 }
 
