@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Consultorio — Asistente de citas</title>
+<title>Asistente de citas por WhatsApp — Demo</title>
 <style>
   :root {
     --ink: #16221f;
@@ -228,8 +228,8 @@
 
 <header>
   <div>
-    <div class="brand">Prima Websites — Prototipo</div>
-    <h1>Asistente de citas para consultorio</h1>
+    <div class="brand">Prima Websites — Demo</div>
+    <h1>Asistente de citas por WhatsApp</h1>
     <div class="sub">Agenda por WhatsApp + control interno para recepción</div>
   </div>
 </header>
@@ -237,7 +237,7 @@
 <div class="layout">
 
   <div class="col">
-    <h2>Agenda del consultorio</h2>
+    <h2>Agenda</h2>
     <div id="citas-list"></div>
 
     <div class="toolbar">
@@ -246,15 +246,15 @@
     </div>
 
     <div class="log">
-      <h3>Mensajes simulados enviados al paciente (WhatsApp)</h3>
+      <h3>Mensajes simulados enviados al cliente (WhatsApp)</h3>
       <div id="wa-log"></div>
     </div>
   </div>
 
   <div class="col">
-    <h2>Chat de paciente (simulado, por WhatsApp)</h2>
+    <h2>Chat de cliente (simulado, por WhatsApp)</h2>
     <div class="chat-window">
-      <div class="chat-header">Paciente de prueba ↔ Consultorio</div>
+      <div class="chat-header">Cliente de prueba ↔ Negocio</div>
       <div class="chat-messages" id="paciente-messages"></div>
       <div class="chat-input">
         <input id="paciente-input" type="text" placeholder='Escribe "cita" para empezar' />
@@ -262,7 +262,7 @@
       </div>
     </div>
     <div class="hint">
-      Simula ser un paciente nuevo. Escribe <code>cita</code> y sigue el flujo:
+      Simula ser un cliente nuevo. Escribe <code>cita</code> y sigue el flujo:
       día → hora disponible → nombre → confirmación. Al confirmar, la cita
       se guarda de verdad y aparece en la agenda de la izquierda.
     </div>
@@ -271,7 +271,7 @@
   <div class="col">
     <h2>Chat interno — Recepción</h2>
     <div class="chat-window">
-      <div class="chat-header">Tú (recepción) ↔ Asistente del consultorio</div>
+      <div class="chat-header">Tú (recepción) ↔ Asistente del negocio</div>
       <div class="chat-messages" id="chat-messages"></div>
       <div class="chat-input">
         <input id="chat-input" type="text" placeholder="Escribe un comando, ej: cancela la cita de María López" />
@@ -303,6 +303,12 @@ function addBubble(text, from) {
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
+const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+function formatearFecha(fechaISO) {
+  const [, m, d] = fechaISO.split('-').map(Number);
+  return `${d} ${MESES[m - 1]}`;
+}
+
 async function cargarCitas() {
   const res = await fetch('/api/citas');
   const citas = await res.json();
@@ -313,7 +319,7 @@ async function cargarCitas() {
     card.innerHTML = `
       <div class="info">
         <div class="paciente">${c.paciente}</div>
-        <div class="detalle">${c.dia} · ${c.hora}</div>
+        <div class="detalle">${formatearFecha(c.fecha)} · ${c.hora}</div>
       </div>
       <div class="estado ${c.estado}">${c.estado}</div>
     `;
@@ -372,7 +378,7 @@ async function enviarMensajePaciente() {
 document.getElementById('paciente-send').addEventListener('click', enviarMensajePaciente);
 pacienteInput.addEventListener('keydown', e => { if (e.key === 'Enter') enviarMensajePaciente(); });
 
-addBurbujaPaciente('Escribe "cita" para simular que eres un paciente nuevo agendando por WhatsApp.', 'sistema');
+addBurbujaPaciente('Escribe "cita" para simular que eres un cliente nuevo agendando por WhatsApp.', 'sistema');
 
 document.getElementById('btn-refrescar').addEventListener('click', cargarCitas);
 
@@ -387,7 +393,7 @@ document.getElementById('btn-recordatorios').addEventListener('click', async () 
   });
 });
 
-addBubble('Hola, soy el asistente del consultorio. Escribe un comando para gestionar una cita.', 'sistema');
+addBubble('Hola, soy el asistente de citas. Escribe un comando para gestionar una cita.', 'sistema');
 cargarCitas();
 </script>
 

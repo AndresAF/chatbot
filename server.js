@@ -146,7 +146,7 @@ async function correrRecordatorios() {
     db.marcarRecordatorioEnviado(c.id);
     console.log(`Recordatorio automático enviado a ${c.paciente}`);
   }
-  return pendientesRecordatorio.length;
+  return pendientesRecordatorio;
 }
 
 cron.schedule("*/15 * * * *", correrRecordatorios);
@@ -187,8 +187,8 @@ app.post("/api/simular-paciente", async (req, res) => {
 
 // Disparar el barrido de recordatorios manualmente (para demo)
 app.post("/api/enviar-recordatorios", async (req, res) => {
-  const enviados = await correrRecordatorios();
-  res.json({ enviados });
+  const resultados = await correrRecordatorios();
+  res.json({ resultados });
 });
 
 app.listen(PORT, () => {
