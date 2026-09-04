@@ -5,6 +5,7 @@
 
 const db = require("./db");
 const { parsearFecha, parsearHora, formatoLegible } = require("./dateutils");
+const { interpretarMensajeInicial } = require("./iaChat");
 
 const estados = {}; // { "whatsapp:+52...": { paso, fecha, hora, nombre } }
 
@@ -18,22 +19,27 @@ async function manejarMensajePaciente(from, textoOriginal) {
   const texto = textoOriginal.trim();
   const estado = estados[from];
 
-  // --- Inicio de conversación ---
+  // --- Inicio de conversación (o cualquier mensaje fuera del flujo de agendado) ---
   if (!estado) {
-    const quiereCita = /cita|agendar|agénda|reservar|consulta/i.test(texto);
-    const esSoloSaludo = /^(hola|hey|buenas|buenos dias|buenos días|buenas tardes|buenas noches|que tal|qué tal)[\s!.,¡¿?]*$/i.test(texto.trim());
-
-    if (esSoloSaludo && !quiereCita) {
-      return "¡Hola! ¿En qué te puedo ayudar? Si quieres agendar una cita, dime \"cita\" y con gusto te ayudo a encontrar un horario.";
-    }
-
-    if (quiereCita || /quiero/i.test(texto)) {
+    const iniciarAgendado = () => {
       estados[from] = { paso: "PIDIENDO_DIA" };
       const sugerencias = db.proximosDiasConDisponibilidad(3);
       if (sugerencias.length === 0) {
         return "Por ahora no tenemos horarios disponibles próximamente. En breve nos pondremos en contacto contigo.";
       }
       return `¡Hola! Con gusto te agendamos. ¿Qué día te gustaría venir? (ej. "mañana", "jueves", "15 de septiembre")\n\nAlgunos días con espacio:\n${listaDisponibilidad(sugerencias)}`;
+    };
+
+    const resultado = await interpretarMensajeInicial(texto);
+    if (resultado) {
+      return resultado.quiereAgendar
+        ? iniciarAgendado()
+        : (resultado.respuesta || "Gracias por tu mensaje. Escribe \"cita\" si quieres agendar una consulta.");
+    }
+
+    // Respaldo por reglas si la llamada a Claude falla
+    if (/cita|agendar|agénda|reservar|consulta|quiero/i.test(texto)) {
+      return iniciarAgendado();
     }
     return "Gracias por tu mensaje. Escribe \"cita\" si quieres agendar una consulta.";
   }
