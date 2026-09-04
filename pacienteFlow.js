@@ -33,7 +33,7 @@ async function manejarMensajePaciente(from, textoOriginal) {
 
   // --- Esperando el día ---
   if (estado.paso === "PIDIENDO_DIA") {
-    const fecha = parsearFecha(texto);
+    const fecha = await parsearFecha(texto);
     if (!fecha) {
       return "No entendí la fecha. Intenta con algo como \"mañana\", \"viernes\" o \"15 de septiembre\".";
     }
@@ -51,7 +51,7 @@ async function manejarMensajePaciente(from, textoOriginal) {
 
   // --- Esperando la hora ---
   if (estado.paso === "PIDIENDO_HORA") {
-    const hora = parsearHora(texto);
+    const hora = await parsearHora(texto);
     if (!hora || !db.horaEstaDisponible(estado.fecha, hora)) {
       const { slots } = db.disponibilidad(estado.fecha);
       return `Esa hora no está disponible. Los horarios libres ese día son: ${slots.join(", ")}. ¿Cuál eliges?`;
