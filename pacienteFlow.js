@@ -5,7 +5,7 @@
 
 const db = require("./db");
 const { parsearFecha, parsearHora, formatoLegible } = require("./dateutils");
-const { interpretarMensajeInicial } = require("./iaChat");
+const { interpretarMensajeInicial, esMensajeInapropiado } = require("./iaChat");
 
 const estados = {}; // { "whatsapp:+52...": { paso, fecha, hora, nombre } }
 
@@ -17,6 +17,13 @@ function listaDisponibilidad(dias) {
 
 async function manejarMensajePaciente(from, textoOriginal) {
   const texto = textoOriginal.trim();
+
+  // Filtro de contenido inapropiado: se revisa primero, sin importar en qué
+  // paso vaya la conversación, y sin llamar a Claude (mensaje fijo, gratis).
+  if (esMensajeInapropiado(texto)) {
+    return "Por favor mantengamos la conversación enfocada en agendar tu cita. Escribe \"cita\" cuando quieras continuar.";
+  }
+
   const estado = estados[from];
 
   // --- Inicio de conversación (o cualquier mensaje fuera del flujo de agendado) ---
