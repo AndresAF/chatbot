@@ -91,6 +91,13 @@ function parsearHoraRegex(textoOriginal) {
 
 // ==================== Interpretación con Claude ====================
 
+// Ambas funciones devuelven { valor, mensaje }:
+// - valor: la fecha ISO / hora 24h si se entendió, o null si no.
+// - mensaje: null si se entendió: si no, una pregunta corta y natural para
+//   volver a pedirle la fecha/hora al cliente, tomando en cuenta lo que
+//   escribió (generada por Claude, o un mensaje genérico si se usó el
+//   respaldo por regex).
+
 async function parsearFecha(textoOriginal, desde = new Date()) {
   const hoyISO = toISO(desde);
   const diaSemanaHoy = DIAS[desde.getDay()];
@@ -112,9 +119,13 @@ async function parsearFecha(textoOriginal, desde = new Date()) {
             fecha_iso: {
               type: ["string", "null"],
               description: "Fecha en formato YYYY-MM-DD. Solo se llena si es_una_fecha es true Y la fecha se pudo determinar sin ambigüedad. Si es_una_fecha es false, o hay una contradicción (ej. el día de la semana mencionado no corresponde al número de día mencionado), esto debe ser null."
+            },
+            mensaje_aclaracion: {
+              type: ["string", "null"],
+              description: "SOLO si fecha_iso quedó null: una pregunta corta, cálida y natural en español (como la escribiría una recepcionista real) para pedirle al cliente que aclare qué día quiere, tomando en cuenta lo que escribió. Si fecha_iso no es null, esto debe ser null."
             }
           },
-          required: ["es_una_fecha", "fecha_iso"],
+          required: ["es_una_fecha", "fecha_iso", "mensaje_aclaracion"],
           additionalProperties: false
         },
         strict: true
@@ -128,18 +139,26 @@ Primero decide si ese mensaje es realmente el cliente dándote una fecha (es_una
 
 Si sí es una fecha, determina fecha_iso (YYYY-MM-DD):
 - Si menciona un día de la semana Y un número de día del mes juntos (ej. "viernes 4"), ambos deben coincidir con la misma fecha real; si no coinciden, o es ambiguo, fecha_iso debe ser null.
-- Si solo da un día de la semana, usa la próxima ocurrencia de ese día a partir de hoy (si hoy mismo es ese día, usa el de la próxima semana).`
+- Si solo da un día de la semana, usa la próxima ocurrencia de ese día a partir de hoy (si hoy mismo es ese día, usa el de la próxima semana).
+
+Si fecha_iso queda null, escribe un mensaje_aclaracion breve y natural pidiéndole que aclare, mencionando algo de lo que escribió si tiene sentido.`
       }]
     });
 
     const bloque = respuesta.content.find(b => b.type === "tool_use");
     if (bloque && bloque.input.es_una_fecha && bloque.input.fecha_iso) {
-      return bloque.input.fecha_iso;
+      return { valor: bloque.input.fecha_iso, mensaje: null };
     }
-    return null;
+    const mensaje = (bloque && bloque.input.mensaje_aclaracion) ||
+      "No entendí bien el día. ¿Podrías decirme la fecha de otra forma? (ej. \"mañana\", \"viernes\" o \"15 de septiembre\")";
+    return { valor: null, mensaje };
   } catch (err) {
     console.error("Error interpretando fecha con Claude, usando respaldo:", err.message);
-    return parsearFechaRegex(textoOriginal, desde);
+    const valor = parsearFechaRegex(textoOriginal, desde);
+    return {
+      valor,
+      mensaje: valor ? null : "No entendí la fecha. Intenta con algo como \"mañana\", \"viernes\" o \"15 de septiembre\"."
+    };
   }
 }
 
@@ -161,9 +180,13 @@ async function parsearHora(textoOriginal) {
             hora_24h: {
               type: ["string", "null"],
               description: "Hora en formato HH:MM de 24 horas. Solo se llena si es_una_hora es true. Si es_una_hora es false, esto debe ser null."
+            },
+            mensaje_aclaracion: {
+              type: ["string", "null"],
+              description: "SOLO si hora_24h quedó null: una pregunta corta, cálida y natural en español (como la escribiría una recepcionista real) para pedirle al cliente que aclare a qué hora quiere, tomando en cuenta lo que escribió. Si hora_24h no es null, esto debe ser null."
             }
           },
-          required: ["es_una_hora", "hora_24h"],
+          required: ["es_una_hora", "hora_24h", "mensaje_aclaracion"],
           additionalProperties: false
         },
         strict: true
@@ -175,18 +198,26 @@ async function parsearHora(textoOriginal) {
 
 Primero decide si ese mensaje es realmente el cliente dándote una hora (es_una_hora), o si es otra cosa (una pregunta, una corrección tipo "dije...", una queja, texto no relacionado) — en ese segundo caso es_una_hora es false y hora_24h null, sin importar si el mensaje contiene números sueltos.
 
-Si sí es una hora, determina hora_24h (HH:MM). Si no dio am/pm y es ambigua entre mañana/tarde, asume horario de negocio (tarde, ej. "4" -> "16:00").`
+Si sí es una hora, determina hora_24h (HH:MM). Si no dio am/pm y es ambigua entre mañana/tarde, asume horario de negocio (tarde, ej. "4" -> "16:00").
+
+Si hora_24h queda null, escribe un mensaje_aclaracion breve y natural pidiéndole que aclare, mencionando algo de lo que escribió si tiene sentido.`
       }]
     });
 
     const bloque = respuesta.content.find(b => b.type === "tool_use");
     if (bloque && bloque.input.es_una_hora && bloque.input.hora_24h) {
-      return bloque.input.hora_24h;
+      return { valor: bloque.input.hora_24h, mensaje: null };
     }
-    return null;
+    const mensaje = (bloque && bloque.input.mensaje_aclaracion) ||
+      "No entendí bien la hora. ¿Podrías decírmela de otra forma?";
+    return { valor: null, mensaje };
   } catch (err) {
     console.error("Error interpretando hora con Claude, usando respaldo:", err.message);
-    return parsearHoraRegex(textoOriginal);
+    const valor = parsearHoraRegex(textoOriginal);
+    return {
+      valor,
+      mensaje: valor ? null : "No entendí la hora. Intenta con algo como \"5pm\" o \"17:00\"."
+    };
   }
 }
 

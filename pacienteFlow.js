@@ -20,7 +20,14 @@ async function manejarMensajePaciente(from, textoOriginal) {
 
   // --- Inicio de conversación ---
   if (!estado) {
-    if (/hola|cita|agendar|quiero/i.test(texto)) {
+    const quiereCita = /cita|agendar|agénda|reservar|consulta/i.test(texto);
+    const esSoloSaludo = /^(hola|hey|buenas|buenos dias|buenos días|buenas tardes|buenas noches|que tal|qué tal)[\s!.,¡¿?]*$/i.test(texto.trim());
+
+    if (esSoloSaludo && !quiereCita) {
+      return "¡Hola! ¿En qué te puedo ayudar? Si quieres agendar una cita, dime \"cita\" y con gusto te ayudo a encontrar un horario.";
+    }
+
+    if (quiereCita || /quiero/i.test(texto)) {
       estados[from] = { paso: "PIDIENDO_DIA" };
       const sugerencias = db.proximosDiasConDisponibilidad(3);
       if (sugerencias.length === 0) {
@@ -33,9 +40,9 @@ async function manejarMensajePaciente(from, textoOriginal) {
 
   // --- Esperando el día ---
   if (estado.paso === "PIDIENDO_DIA") {
-    const fecha = await parsearFecha(texto);
+    const { valor: fecha, mensaje: aclaracion } = await parsearFecha(texto);
     if (!fecha) {
-      return "No entendí la fecha. Intenta con algo como \"mañana\", \"viernes\" o \"15 de septiembre\".";
+      return aclaracion;
     }
     const { abierto, slots } = db.disponibilidad(fecha);
     if (!abierto) {
@@ -51,8 +58,11 @@ async function manejarMensajePaciente(from, textoOriginal) {
 
   // --- Esperando la hora ---
   if (estado.paso === "PIDIENDO_HORA") {
-    const hora = await parsearHora(texto);
-    if (!hora || !db.horaEstaDisponible(estado.fecha, hora)) {
+    const { valor: hora, mensaje: aclaracion } = await parsearHora(texto);
+    if (!hora) {
+      return aclaracion;
+    }
+    if (!db.horaEstaDisponible(estado.fecha, hora)) {
       const { slots } = db.disponibilidad(estado.fecha);
       return `Esa hora no está disponible. Los horarios libres ese día son: ${slots.join(", ")}. ¿Cuál eliges?`;
     }
