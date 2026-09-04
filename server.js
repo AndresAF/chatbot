@@ -44,7 +44,7 @@ app.post("/webhook/whatsapp", async (req, res) => {
     : await manejarMensajePaciente(from, body);
 
   const twiml = new twilio.twiml.MessagingResponse();
-  twiml.message(respuesta);
+  if (respuesta) twiml.message(respuesta);
   res.type("text/xml").send(twiml.toString());
 });
 
@@ -89,8 +89,8 @@ async function manejarRecepcion(from, body) {
 
   // Para REAGENDAR, validamos la nueva fecha/hora contra disponibilidad real
   if (accion.intent === "REAGENDAR") {
-    const nuevaFecha = accion.dia ? (await parsearFecha(accion.dia)).valor : cita.fecha;
-    const nuevaHora = accion.hora ? (await parsearHora(accion.hora)).valor : cita.hora;
+    const nuevaFecha = accion.dia ? parsearFecha(accion.dia) : cita.fecha;
+    const nuevaHora = accion.hora ? parsearHora(accion.hora) : cita.hora;
     if (!nuevaFecha || !nuevaHora) {
       return "No pude identificar bien la nueva fecha/hora. Intenta de nuevo, ej: \"cambia la cita de Juan al viernes 5pm\".";
     }

@@ -27,6 +27,17 @@ db.exec(`
     hora_fin TEXT,      -- HH:MM
     duracion_slot INTEGER NOT NULL DEFAULT 30 -- minutos
   );
+
+  CREATE TABLE IF NOT EXISTS sessions (
+    phone TEXT PRIMARY KEY,
+    state TEXT NOT NULL,
+    slots TEXT NOT NULL,             -- JSON
+    offered TEXT,                    -- JSON o NULL
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_message_at TEXT,
+    locale TEXT NOT NULL DEFAULT 'es-MX',
+    timezone TEXT NOT NULL DEFAULT 'America/Mexico_City'
+  );
 `);
 
 // Configuración default: Lunes a Viernes 9:00-18:00, sábado 9:00-14:00, slots de 30 min.
@@ -194,6 +205,52 @@ function citasParaRecordatorio(horasAntes = 24) {
   });
 }
 
+// ---------- Sesiones de conversación (una fila por teléfono) ----------
+
+function getSession(phone) {
+  const row = db.prepare("SELECT * FROM sessions WHERE phone = ?").get(phone);
+  if (!row) return null;
+  return {
+    phone: row.phone,
+    state: row.state,
+    slots: JSON.parse(row.slots),
+    offered: row.offered ? JSON.parse(row.offered) : null,
+    attempts: row.attempts,
+    last_message_at: row.last_message_at,
+    locale: row.locale,
+    timezone: row.timezone,
+  };
+}
+
+function saveSession(session) {
+  db.prepare(`
+    INSERT INTO sessions (phone, state, slots, offered, attempts, last_message_at, locale, timezone)
+    VALUES (@phone, @state, @slots, @offered, @attempts, @last_message_at, @locale, @timezone)
+    ON CONFLICT(phone) DO UPDATE SET
+      state = excluded.state,
+      slots = excluded.slots,
+      offered = excluded.offered,
+      attempts = excluded.attempts,
+      last_message_at = excluded.last_message_at,
+      locale = excluded.locale,
+      timezone = excluded.timezone
+  `).run({
+    phone: session.phone,
+    state: session.state,
+    slots: JSON.stringify(session.slots),
+    offered: session.offered ? JSON.stringify(session.offered) : null,
+    attempts: session.attempts || 0,
+    last_message_at: session.last_message_at || new Date().toISOString(),
+    locale: session.locale || "es-MX",
+    timezone: session.timezone || "America/Mexico_City",
+  });
+  return session;
+}
+
+function eliminarSession(phone) {
+  db.prepare("DELETE FROM sessions WHERE phone = ?").run(phone);
+}
+
 // Genera una copia consistente del archivo SQLite (usa la API de backup
 // online, así no se corta a medias por el modo WAL) en la ruta indicada.
 function backup(destino) {
@@ -206,4 +263,5 @@ module.exports = {
   getConfigDia, actualizarConfigDia, listarConfigHorario,
   disponibilidad, horaEstaDisponible, proximosDiasConDisponibilidad,
   citasParaRecordatorio, backup,
+  getSession, saveSession, eliminarSession,
 };

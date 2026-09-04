@@ -1,13 +1,10 @@
 // dateutils.js
-// Convierte expresiones en español ("mañana", "lunes", "15 de septiembre")
-// a fecha ISO (YYYY-MM-DD), y horas ("5pm", "17:00", "5 de la tarde") a HH:MM 24h.
-//
-// La interpretación real la hace Claude (para manejar frases variadas y
-// correcciones del usuario sin reglas rígidas). Las funciones *Regex de
-// abajo quedan como respaldo determinista si la llamada a la API falla.
-
-const Anthropic = require("@anthropic-ai/sdk");
-const anthropic = new Anthropic();
+// Utilidades de fecha/hora deterministas (sin IA). Se usan para:
+// - Formatear fechas para mostrar (formatoLegible).
+// - El flujo de recepción (comandos de texto libre del staff, ej. "cambia
+//   la cita de Juan al viernes 5pm"), que no tiene una lista de opciones
+//   previa contra la cual resolver (ver nucleo.js para el flujo del
+//   cliente, que sí resuelve contra offered.options en vez de re-parsear).
 
 const DIAS = ["domingo", "lunes", "martes", "miercoles", "jueves", "viernes", "sabado"];
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
@@ -23,10 +20,8 @@ function toISO(d) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-// ==================== Respaldo determinista (regex) ====================
-// Se usa SOLO si la llamada a Claude falla (red caída, error de API, etc.)
-
-function parsearFechaRegex(textoOriginal, desde = new Date()) {
+// Interpreta texto en español y devuelve fecha ISO, o null si no reconoce nada.
+function parsearFecha(textoOriginal, desde = new Date()) {
   const texto = quitarAcentos(textoOriginal.toLowerCase());
 
   if (/\bhoy\b/.test(texto)) return toISO(desde);
@@ -37,6 +32,7 @@ function parsearFechaRegex(textoOriginal, desde = new Date()) {
     return toISO(d);
   }
 
+  // DD/MM o DD-MM (asume año actual, o siguiente si ya pasó)
   const matchNum = texto.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/);
   if (matchNum) {
     const dia = parseInt(matchNum[1], 10);
@@ -48,6 +44,7 @@ function parsearFechaRegex(textoOriginal, desde = new Date()) {
     return toISO(d);
   }
 
+  // "15 de septiembre"
   const matchMes = texto.match(/(\d{1,2})\s*(?:de)?\s*(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)/);
   if (matchMes) {
     const dia = parseInt(matchMes[1], 10);
@@ -58,21 +55,38 @@ function parsearFechaRegex(textoOriginal, desde = new Date()) {
     return toISO(d);
   }
 
-  for (let i = 0; i < DIAS.length; i++) {
-    if (texto.includes(DIAS[i])) {
-      const d = new Date(desde);
-      const hoyDia = d.getDay();
-      let diff = (i - hoyDia + 7) % 7;
-      if (diff === 0) diff = 7;
-      d.setDate(d.getDate() + diff);
-      return toISO(d);
+  const diaSemanaIdx = DIAS.findIndex(d => texto.includes(d));
+  const soloNumero = texto.match(/\b(\d{1,2})\b/);
+
+  // Día de la semana + número de día sueltos ("viernes 4"): el número manda.
+  // Busca, en el mes actual o el siguiente, el día que caiga en ese número Y
+  // en ese día de la semana; si no coincide con ninguno, no inventa nada.
+  if (diaSemanaIdx !== -1 && soloNumero) {
+    const dia = parseInt(soloNumero[1], 10);
+    for (const deltaMes of [0, 1]) {
+      const d = new Date(desde.getFullYear(), desde.getMonth() + deltaMes, dia);
+      if (d.getDate() === dia && d.getDay() === diaSemanaIdx && toISO(d) >= toISO(desde)) {
+        return toISO(d);
+      }
     }
+    return null;
+  }
+
+  // Solo día de la semana ("lunes", "el viernes")
+  if (diaSemanaIdx !== -1) {
+    const d = new Date(desde);
+    const hoyDia = d.getDay();
+    let diff = (diaSemanaIdx - hoyDia + 7) % 7;
+    if (diff === 0) diff = 7; // si dice "lunes" y hoy es lunes, asume el siguiente
+    d.setDate(d.getDate() + diff);
+    return toISO(d);
   }
 
   return null;
 }
 
-function parsearHoraRegex(textoOriginal) {
+// Interpreta hora en español/números y devuelve HH:MM (24h), o null.
+function parsearHora(textoOriginal) {
   const texto = quitarAcentos(textoOriginal.toLowerCase());
   const match = texto.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?/);
   if (!match) return null;
@@ -83,142 +97,12 @@ function parsearHoraRegex(textoOriginal) {
 
   if (sufijo === "pm" && h < 12) h += 12;
   if (sufijo === "am" && h === 12) h = 0;
+
+  // Heurística: si no dieron am/pm y la hora es entre 1-7, asume tarde (negocio)
   if (!sufijo && h >= 1 && h <= 7) h += 12;
 
   if (h > 23 || m > 59) return null;
   return `${pad(h)}:${pad(m)}`;
-}
-
-// ==================== Interpretación con Claude ====================
-
-// Ambas funciones devuelven { valor, mensaje }:
-// - valor: la fecha ISO / hora 24h si se entendió, o null si no.
-// - mensaje: null si se entendió: si no, una pregunta corta y natural para
-//   volver a pedirle la fecha/hora al cliente, tomando en cuenta lo que
-//   escribió (generada por Claude, o un mensaje genérico si se usó el
-//   respaldo por regex).
-
-async function parsearFecha(textoOriginal, desde = new Date()) {
-  const hoyISO = toISO(desde);
-  const diaSemanaHoy = DIAS[desde.getDay()];
-
-  try {
-    const respuesta = await anthropic.messages.create({
-      model: "claude-haiku-4-5",
-      max_tokens: 512,
-      tools: [{
-        name: "reportar_fecha",
-        description: "Reporta la fecha exacta que el usuario quiso decir para agendar una cita.",
-        input_schema: {
-          type: "object",
-          properties: {
-            es_una_fecha: {
-              type: "boolean",
-              description: "true SOLO si el mensaje completo es el cliente indicando la fecha que quiere para su cita. Si es una pregunta, una corrección ('dije...', 'no, me refería a...'), una queja, o menciona cualquier otra cosa en vez de (o además de) responder con una fecha, esto debe ser false — aunque el mensaje contenga números o nombres de días."
-            },
-            fecha_iso: {
-              type: ["string", "null"],
-              description: "Fecha en formato YYYY-MM-DD. Solo se llena si es_una_fecha es true Y la fecha se pudo determinar sin ambigüedad. Si es_una_fecha es false, o hay una contradicción (ej. el día de la semana mencionado no corresponde al número de día mencionado), esto debe ser null."
-            },
-            mensaje_aclaracion: {
-              type: ["string", "null"],
-              description: "SOLO si fecha_iso quedó null: una pregunta corta, cálida y natural en español (como la escribiría una recepcionista real) para pedirle al cliente que aclare qué día quiere, tomando en cuenta lo que escribió. Si fecha_iso no es null, esto debe ser null."
-            }
-          },
-          required: ["es_una_fecha", "fecha_iso", "mensaje_aclaracion"],
-          additionalProperties: false
-        },
-        strict: true
-      }],
-      tool_choice: { type: "tool", name: "reportar_fecha" },
-      messages: [{
-        role: "user",
-        content: `Hoy es ${diaSemanaHoy} ${hoyISO}. Le preguntamos a un cliente en qué día quiere una cita, y respondió: "${textoOriginal}".
-
-Primero decide si ese mensaje es realmente el cliente dándote una fecha (es_una_fecha), o si es otra cosa (una pregunta, una corrección tipo "dije...", una queja, texto no relacionado) — en ese segundo caso es_una_fecha es false y fecha_iso null, sin importar si el mensaje contiene números o nombres de días sueltos.
-
-Si sí es una fecha, determina fecha_iso (YYYY-MM-DD):
-- Si menciona un día de la semana Y un número de día del mes juntos (ej. "viernes 4"), ambos deben coincidir con la misma fecha real; si no coinciden, o es ambiguo, fecha_iso debe ser null.
-- Si solo da un día de la semana, usa la próxima ocurrencia de ese día a partir de hoy (si hoy mismo es ese día, usa el de la próxima semana).
-
-Si fecha_iso queda null, escribe un mensaje_aclaracion breve y natural pidiéndole que aclare, mencionando algo de lo que escribió si tiene sentido.`
-      }]
-    });
-
-    const bloque = respuesta.content.find(b => b.type === "tool_use");
-    if (bloque && bloque.input.es_una_fecha && bloque.input.fecha_iso) {
-      return { valor: bloque.input.fecha_iso, mensaje: null };
-    }
-    const mensaje = (bloque && bloque.input.mensaje_aclaracion) ||
-      "No entendí bien el día. ¿Podrías decirme la fecha de otra forma? (ej. \"mañana\", \"viernes\" o \"15 de septiembre\")";
-    return { valor: null, mensaje };
-  } catch (err) {
-    console.error("Error interpretando fecha con Claude, usando respaldo:", err.message);
-    const valor = parsearFechaRegex(textoOriginal, desde);
-    return {
-      valor,
-      mensaje: valor ? null : "No entendí la fecha. Intenta con algo como \"mañana\", \"viernes\" o \"15 de septiembre\"."
-    };
-  }
-}
-
-async function parsearHora(textoOriginal) {
-  try {
-    const respuesta = await anthropic.messages.create({
-      model: "claude-haiku-4-5",
-      max_tokens: 512,
-      tools: [{
-        name: "reportar_hora",
-        description: "Reporta la hora exacta que el usuario quiso decir para su cita.",
-        input_schema: {
-          type: "object",
-          properties: {
-            es_una_hora: {
-              type: "boolean",
-              description: "true SOLO si el mensaje completo es el cliente indicando la hora que quiere para su cita. Si es una pregunta, una corrección ('dije...', 'no, me refería a...'), una queja, o menciona cualquier otra cosa en vez de (o además de) responder con una hora, esto debe ser false — aunque el mensaje contenga números."
-            },
-            hora_24h: {
-              type: ["string", "null"],
-              description: "Hora en formato HH:MM de 24 horas. Solo se llena si es_una_hora es true. Si es_una_hora es false, esto debe ser null."
-            },
-            mensaje_aclaracion: {
-              type: ["string", "null"],
-              description: "SOLO si hora_24h quedó null: una pregunta corta, cálida y natural en español (como la escribiría una recepcionista real) para pedirle al cliente que aclare a qué hora quiere, tomando en cuenta lo que escribió. Si hora_24h no es null, esto debe ser null."
-            }
-          },
-          required: ["es_una_hora", "hora_24h", "mensaje_aclaracion"],
-          additionalProperties: false
-        },
-        strict: true
-      }],
-      tool_choice: { type: "tool", name: "reportar_hora" },
-      messages: [{
-        role: "user",
-        content: `Le preguntamos a un cliente a qué hora quiere su cita, y respondió: "${textoOriginal}".
-
-Primero decide si ese mensaje es realmente el cliente dándote una hora (es_una_hora), o si es otra cosa (una pregunta, una corrección tipo "dije...", una queja, texto no relacionado) — en ese segundo caso es_una_hora es false y hora_24h null, sin importar si el mensaje contiene números sueltos.
-
-Si sí es una hora, determina hora_24h (HH:MM). Si no dio am/pm y es ambigua entre mañana/tarde, asume horario de negocio (tarde, ej. "4" -> "16:00").
-
-Si hora_24h queda null, escribe un mensaje_aclaracion breve y natural pidiéndole que aclare, mencionando algo de lo que escribió si tiene sentido.`
-      }]
-    });
-
-    const bloque = respuesta.content.find(b => b.type === "tool_use");
-    if (bloque && bloque.input.es_una_hora && bloque.input.hora_24h) {
-      return { valor: bloque.input.hora_24h, mensaje: null };
-    }
-    const mensaje = (bloque && bloque.input.mensaje_aclaracion) ||
-      "No entendí bien la hora. ¿Podrías decírmela de otra forma?";
-    return { valor: null, mensaje };
-  } catch (err) {
-    console.error("Error interpretando hora con Claude, usando respaldo:", err.message);
-    const valor = parsearHoraRegex(textoOriginal);
-    return {
-      valor,
-      mensaje: valor ? null : "No entendí la hora. Intenta con algo como \"5pm\" o \"17:00\"."
-    };
-  }
 }
 
 function formatoLegible(fechaISO, hora) {
@@ -229,4 +113,4 @@ function formatoLegible(fechaISO, hora) {
   return hora ? `${base}, ${hora}` : base;
 }
 
-module.exports = { parsearFecha, parsearHora, formatoLegible, toISO };
+module.exports = { parsearFecha, parsearHora, formatoLegible, toISO, quitarAcentos, DIAS, MESES };
