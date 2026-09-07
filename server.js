@@ -8,6 +8,7 @@ const db = require("./db");
 const { interpretar } = require("./parser");
 const { parsearFecha, parsearHora, formatoLegible } = require("./dateutils");
 const { manejarMensajePaciente } = require("./pacienteFlow");
+const { enviarWhatsApp, estaConfigurado } = require("./whatsapp");
 
 // Red de seguridad: un error inesperado en cualquier parte (una llamada a
 // la API de Claude que falla en un lugar no previsto, un bug futuro, etc.)
@@ -28,31 +29,6 @@ app.use(express.static("public"));
 
 const PORT = process.env.PORT || 3000;
 const NUMERO_RECEPCION = process.env.NUMERO_RECEPCION || "";
-
-const twilioClient = process.env.TWILIO_ACCOUNT_SID
-  ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
-  : null;
-
-// Nunca lanza: un envío fallido (límite de Twilio, red, número inválido...)
-// no debe tumbar el proceso ni interrumpir el resto del flujo. Devuelve
-// { ok, error? } para que el caller decida si vale la pena avisar algo.
-async function enviarWhatsApp(to, body) {
-  if (!twilioClient) {
-    console.log(`[SIMULADO -> ${to}]: ${body}`);
-    return { ok: true, simulado: true };
-  }
-  try {
-    await twilioClient.messages.create({
-      from: process.env.TWILIO_WHATSAPP_FROM,
-      to,
-      body,
-    });
-    return { ok: true };
-  } catch (err) {
-    console.error(`Error enviando WhatsApp a ${to}:`, err.message);
-    return { ok: false, error: err.message };
-  }
-}
 
 // ================= WEBHOOK: mensajes entrantes de WhatsApp =================
 app.post("/webhook/whatsapp", async (req, res) => {
@@ -275,6 +251,6 @@ app.get("/api/backup", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
-  console.log(twilioClient ? "Twilio conectado (modo real)" : "Twilio NO configurado -> modo SIMULADO (revisa .env)");
+  console.log(estaConfigurado ? "Twilio conectado (modo real)" : "Twilio NO configurado -> modo SIMULADO (revisa .env)");
   console.log("Recordatorios automáticos: corriendo cada 15 min (cron)");
 });

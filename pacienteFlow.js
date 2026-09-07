@@ -5,9 +5,10 @@
 
 const db = require("./db");
 const { formatoLegible, toISO } = require("./dateutils");
-const { esMensajeInapropiado } = require("./iaChat");
+const { esMensajeInapropiado, pideHumano } = require("./iaChat");
 const { extraer } = require("./extractor");
 const { redactarRespuesta } = require("./redactor");
+const { enviarWhatsApp } = require("./whatsapp");
 const nucleo = require("./nucleo");
 
 const SESION_EXPIRA_MS = 24 * 60 * 60 * 1000; // 24h de silencio -> se reinicia
@@ -142,6 +143,25 @@ async function manejarMensajePaciente(from, textoOriginal) {
 
   if (esMensajeInapropiado(texto)) {
     return "Por favor mantengamos la conversación enfocada en agendar tu cita. Escribe \"cita\" cuando quieras continuar.";
+  }
+
+  // Pide hablar con una persona: el bot se calla de inmediato (sin esperar
+  // a los 3 intentos fallidos de HANDOFF) y se le avisa a recepción para
+  // que alguien entre a la conversación directamente desde WhatsApp/Meta
+  // Business Suite — el bot deja de responder en este chat en cuanto entra
+  // a HANDOFF, así que la persona puede tomar el control sin que se crucen.
+  if (pideHumano(texto)) {
+    const s = cargarSesion(from) || sesionFresca(from);
+    s.state = "HANDOFF";
+    guardar(s);
+    const receptor = process.env.NUMERO_RECEPCION;
+    if (receptor) {
+      await enviarWhatsApp(
+        `whatsapp:${receptor}`,
+        `⚠️ Un cliente (${from.replace("whatsapp:", "")}) pidió hablar con una persona. Entra a la conversación de WhatsApp para atenderlo directamente — el bot ya no le va a responder en este chat.`
+      );
+    }
+    return "Claro, en un momento alguien del equipo te atiende directamente por aquí mismo.";
   }
 
   let session = cargarSesion(from);
