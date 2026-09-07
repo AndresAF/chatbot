@@ -210,7 +210,7 @@ async function manejarMensajePaciente(from, textoOriginal) {
       }
       return yaSaludado
         ? "¿En qué te puedo ayudar? Si quieres agendar una cita, dime \"cita\"."
-        : `¡Hola! Bienvenido a *${negocio.nombre}*. ¿En qué te puedo ayudar? Si quieres agendar una cita, dime "cita" y con gusto te ayudo a encontrar un horario.`;
+        : `¡Hola! 👋 Bienvenido a *${negocio.nombre}*. ¿En qué te puedo ayudar? Si quieres agendar una cita, dime "cita" y con gusto te ayudo a encontrar un horario.`;
     }
 
     const nueva = sesionFresca(from);
@@ -220,7 +220,7 @@ async function manejarMensajePaciente(from, textoOriginal) {
     }
     nueva.offered = offered;
     guardar(nueva);
-    const saludo = yaSaludado ? "¡Perfecto!" : `¡Hola! Bienvenido a *${negocio.nombre}*.`;
+    const saludo = yaSaludado ? "¡Perfecto!" : `¡Hola! 👋 Bienvenido a *${negocio.nombre}*.`;
     return `${saludo} Con gusto te agendamos.\n\n${mensajeFechas(offered)}`;
   }
 
@@ -372,7 +372,7 @@ function manejarConfirm(session, extracted, texto) {
     }
     const telefono = session.phone.replace("whatsapp:", "");
     db.crearCita({ paciente: session.slots.name, telefono, fecha: session.slots.date, hora: session.slots.time });
-    const resumen = `¡Listo! Tu cita quedó agendada para el ${formatoLegible(session.slots.date, session.slots.time)}. Te mandaremos un recordatorio antes. Si necesitas cambiarla, escríbenos.`;
+    const resumen = `✅ ¡Listo! Tu cita quedó agendada para el ${formatoLegible(session.slots.date, session.slots.time)}. Te mandaremos un recordatorio antes. Si necesitas cambiarla, escríbenos.`;
     db.eliminarSession(session.phone);
     return resumen;
   }

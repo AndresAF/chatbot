@@ -139,14 +139,14 @@ async function ejecutarAccion(p) {
 
   if (p.intent === "REAGENDAR") {
     db.reagendarCita(cita.id, p.fecha, p.hora);
-    const r = await enviarWhatsApp(`whatsapp:${cita.telefono}`, `Hola ${cita.paciente}, tu cita fue reagendada para el ${formatoLegible(p.fecha, p.hora)}.`);
+    const r = await enviarWhatsApp(`whatsapp:${cita.telefono}`, `🔄 Hola ${cita.paciente}, tu cita fue reagendada para el ${formatoLegible(p.fecha, p.hora)}.`);
     return r.ok
       ? `Listo, moví la cita de ${cita.paciente} a ${formatoLegible(p.fecha, p.hora)} y le avisé por WhatsApp.`
       : `Moví la cita de ${cita.paciente} a ${formatoLegible(p.fecha, p.hora)} en el sistema, pero no le pude avisar por WhatsApp (falló el envío) — avísale tú por otro medio.`;
   }
 
   if (p.intent === "RECORDATORIO") {
-    const r = await enviarWhatsApp(`whatsapp:${cita.telefono}`, `Hola ${cita.paciente}, te recordamos tu cita el ${formatoLegible(cita.fecha, cita.hora)}. ¡Te esperamos!`);
+    const r = await enviarWhatsApp(`whatsapp:${cita.telefono}`, `⏰ Hola ${cita.paciente}, te recordamos tu cita el ${formatoLegible(cita.fecha, cita.hora)}. ¡Te esperamos!`);
     if (r.ok) db.marcarRecordatorioEnviado(cita.id);
     return r.ok
       ? `Recordatorio enviado a ${cita.paciente}.`
@@ -163,7 +163,7 @@ async function correrRecordatorios() {
   const pendientesRecordatorio = db.citasParaRecordatorio(24);
   const enviados = [];
   for (const c of pendientesRecordatorio) {
-    const resultado = await enviarWhatsApp(`whatsapp:${c.telefono}`, `Hola ${c.paciente}, te recordamos tu cita el ${formatoLegible(c.fecha, c.hora)}. ¡Te esperamos!`);
+    const resultado = await enviarWhatsApp(`whatsapp:${c.telefono}`, `⏰ Hola ${c.paciente}, te recordamos tu cita el ${formatoLegible(c.fecha, c.hora)}. ¡Te esperamos!`);
     if (resultado.ok) {
       db.marcarRecordatorioEnviado(c.id);
       console.log(`Recordatorio automático enviado a ${c.paciente}`);
