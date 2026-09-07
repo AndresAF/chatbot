@@ -7,6 +7,7 @@ const db = require("./db");
 const { formatoLegible, toISO } = require("./dateutils");
 const { esMensajeInapropiado } = require("./iaChat");
 const { extraer } = require("./extractor");
+const { redactarRespuesta } = require("./redactor");
 const nucleo = require("./nucleo");
 
 const SESION_EXPIRA_MS = 24 * 60 * 60 * 1000; // 24h de silencio -> se reinicia
@@ -29,16 +30,27 @@ function formatearHorarios() {
   return abiertos.map(c => `${DIAS_LARGOS[c.dia_semana]}: ${c.hora_inicio} a ${c.hora_fin}`).join("\n");
 }
 
-function responderPreguntaComun(tema) {
+// Le da calidez a la respuesta usando Claude, pero solo con datos reales que
+// ya tenemos (nunca inventa precios, promociones, etc. que no existen). Si
+// la llamada a Claude falla, cae a una plantilla fija con el mismo dato real.
+async function responderPreguntaComun(pregunta, tema) {
   const negocio = db.obtenerNegocio();
+
+  let datosReales = null;
+  if (tema === "horarios") datosReales = `Horario:\n${formatearHorarios()}`;
+  else if (tema === "servicios") datosReales = `Servicios que ofrecemos: ${negocio.servicios}`;
+  else if (tema === "ubicacion" && negocio.direccion) datosReales = `Dirección: ${negocio.direccion}`;
+  // tema "otro"/"ninguno" (ej. precios) o ubicación sin dirección configurada:
+  // datosReales queda null a propósito — el redactor sabe que no hay dato
+  // específico y debe responder con calidez sin inventar nada.
+
+  const redactada = await redactarRespuesta({ pregunta, datosReales, nombreNegocio: negocio.nombre });
+  if (redactada) return redactada;
+
   if (tema === "horarios") return `Nuestro horario:\n${formatearHorarios()}`;
   if (tema === "servicios") return `Ofrecemos: ${negocio.servicios}.`;
-  if (tema === "ubicacion") {
-    return negocio.direccion
-      ? `Estamos en ${negocio.direccion}.`
-      : "No tengo la dirección a la mano ahorita — contáctanos directamente para confirmarla.";
-  }
-  return "No tengo esa información a la mano ahorita.";
+  if (tema === "ubicacion" && negocio.direccion) return `Estamos en ${negocio.direccion}.`;
+  return "No tengo ese dato a la mano ahorita, pero con gusto te puede ayudar alguien del equipo.";
 }
 
 // ---------- Construcción de ofertas (listas con ids) ----------
@@ -153,7 +165,8 @@ async function manejarMensajePaciente(from, textoOriginal) {
 
     if (!quiereAgendar) {
       if (extracted && extracted.intent === "ask_question") {
-        return `${responderPreguntaComun(extracted.tema_pregunta)}\n\n¿Te gustaría agendar una cita? Escribe "cita".`;
+        const respuesta = await responderPreguntaComun(texto, extracted.tema_pregunta);
+        return `${respuesta}\n\n¿Te gustaría agendar una cita? Escribe "cita".`;
       }
       if (extracted && extracted.intent === "cancel") {
         return "Sin problema. Escribe \"cita\" cuando quieras agendar.";
@@ -195,7 +208,8 @@ async function manejarMensajePaciente(from, textoOriginal) {
   // Pregunta fuera de flujo: se responde y se repite lo pendiente, sin perder el estado
   if (extracted && extracted.intent === "ask_question" && session.state !== "CONFIRM") {
     guardar(session);
-    return `${responderPreguntaComun(extracted.tema_pregunta)}\n\n${preguntaPendiente(session.state, session)}`;
+    const respuesta = await responderPreguntaComun(texto, extracted.tema_pregunta);
+    return `${respuesta}\n\n${preguntaPendiente(session.state, session)}`;
   }
 
   // Corrección: solo tiene sentido en estados donde ya hay una fecha/hora
