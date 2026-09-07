@@ -9,6 +9,18 @@ const { interpretar } = require("./parser");
 const { parsearFecha, parsearHora, formatoLegible } = require("./dateutils");
 const { manejarMensajePaciente } = require("./pacienteFlow");
 
+// Red de seguridad: un error inesperado en cualquier parte (una llamada a
+// la API de Claude que falla en un lugar no previsto, un bug futuro, etc.)
+// se registra en el log, pero nunca tumba el proceso completo. Para un
+// negocio vendiendo esto en vivo, es mejor un log con un error que un
+// servidor caído hasta que Railway lo reinicie solo.
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled promise rejection:", err);
+});
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught exception:", err);
+});
+
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
@@ -21,16 +33,25 @@ const twilioClient = process.env.TWILIO_ACCOUNT_SID
   ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
   : null;
 
+// Nunca lanza: un envío fallido (límite de Twilio, red, número inválido...)
+// no debe tumbar el proceso ni interrumpir el resto del flujo. Devuelve
+// { ok, error? } para que el caller decida si vale la pena avisar algo.
 async function enviarWhatsApp(to, body) {
   if (!twilioClient) {
     console.log(`[SIMULADO -> ${to}]: ${body}`);
-    return { simulado: true, to, body };
+    return { ok: true, simulado: true };
   }
-  return twilioClient.messages.create({
-    from: process.env.TWILIO_WHATSAPP_FROM,
-    to,
-    body,
-  });
+  try {
+    await twilioClient.messages.create({
+      from: process.env.TWILIO_WHATSAPP_FROM,
+      to,
+      body,
+    });
+    return { ok: true };
+  } catch (err) {
+    console.error(`Error enviando WhatsApp a ${to}:`, err.message);
+    return { ok: false, error: err.message };
+  }
 }
 
 // ================= WEBHOOK: mensajes entrantes de WhatsApp =================
@@ -39,9 +60,15 @@ app.post("/webhook/whatsapp", async (req, res) => {
   const body = (req.body.Body || "").trim();
   const esRecepcion = NUMERO_RECEPCION && from === `whatsapp:${NUMERO_RECEPCION}`;
 
-  const respuesta = esRecepcion
-    ? await manejarRecepcion(from, body)
-    : await manejarMensajePaciente(from, body);
+  let respuesta;
+  try {
+    respuesta = esRecepcion
+      ? await manejarRecepcion(from, body)
+      : await manejarMensajePaciente(from, body);
+  } catch (err) {
+    console.error("Error procesando mensaje entrante:", err);
+    respuesta = "Tuvimos un problema técnico procesando tu mensaje. Por favor intenta de nuevo en un momento.";
+  }
 
   const twiml = new twilio.twiml.MessagingResponse();
   if (respuesta) twiml.message(respuesta);
@@ -117,20 +144,26 @@ async function ejecutarAccion(p) {
 
   if (p.intent === "CANCELAR") {
     db.cancelarCita(cita.id);
-    await enviarWhatsApp(`whatsapp:${cita.telefono}`, `Hola ${cita.paciente}, tu cita del ${formatoLegible(cita.fecha, cita.hora)} ha sido cancelada. Si fue un error, contáctanos.`);
-    return `Listo, cancelé la cita de ${cita.paciente} y le avisé por WhatsApp.`;
+    const r = await enviarWhatsApp(`whatsapp:${cita.telefono}`, `Hola ${cita.paciente}, tu cita del ${formatoLegible(cita.fecha, cita.hora)} ha sido cancelada. Si fue un error, contáctanos.`);
+    return r.ok
+      ? `Listo, cancelé la cita de ${cita.paciente} y le avisé por WhatsApp.`
+      : `Cancelé la cita de ${cita.paciente} en el sistema, pero no le pude avisar por WhatsApp (falló el envío) — avísale tú por otro medio.`;
   }
 
   if (p.intent === "REAGENDAR") {
     db.reagendarCita(cita.id, p.fecha, p.hora);
-    await enviarWhatsApp(`whatsapp:${cita.telefono}`, `Hola ${cita.paciente}, tu cita fue reagendada para el ${formatoLegible(p.fecha, p.hora)}.`);
-    return `Listo, moví la cita de ${cita.paciente} a ${formatoLegible(p.fecha, p.hora)} y le avisé por WhatsApp.`;
+    const r = await enviarWhatsApp(`whatsapp:${cita.telefono}`, `Hola ${cita.paciente}, tu cita fue reagendada para el ${formatoLegible(p.fecha, p.hora)}.`);
+    return r.ok
+      ? `Listo, moví la cita de ${cita.paciente} a ${formatoLegible(p.fecha, p.hora)} y le avisé por WhatsApp.`
+      : `Moví la cita de ${cita.paciente} a ${formatoLegible(p.fecha, p.hora)} en el sistema, pero no le pude avisar por WhatsApp (falló el envío) — avísale tú por otro medio.`;
   }
 
   if (p.intent === "RECORDATORIO") {
-    await enviarWhatsApp(`whatsapp:${cita.telefono}`, `Hola ${cita.paciente}, te recordamos tu cita el ${formatoLegible(cita.fecha, cita.hora)}. ¡Te esperamos!`);
-    db.marcarRecordatorioEnviado(cita.id);
-    return `Recordatorio enviado a ${cita.paciente}.`;
+    const r = await enviarWhatsApp(`whatsapp:${cita.telefono}`, `Hola ${cita.paciente}, te recordamos tu cita el ${formatoLegible(cita.fecha, cita.hora)}. ¡Te esperamos!`);
+    if (r.ok) db.marcarRecordatorioEnviado(cita.id);
+    return r.ok
+      ? `Recordatorio enviado a ${cita.paciente}.`
+      : `No pude enviar el recordatorio a ${cita.paciente} (falló el envío) — intenta de nuevo en un momento.`;
   }
 
   return "No supe qué hacer con eso.";
@@ -141,15 +174,27 @@ async function ejecutarAccion(p) {
 // que aún no lo han recibido.
 async function correrRecordatorios() {
   const pendientesRecordatorio = db.citasParaRecordatorio(24);
+  const enviados = [];
   for (const c of pendientesRecordatorio) {
-    await enviarWhatsApp(`whatsapp:${c.telefono}`, `Hola ${c.paciente}, te recordamos tu cita el ${formatoLegible(c.fecha, c.hora)}. ¡Te esperamos!`);
-    db.marcarRecordatorioEnviado(c.id);
-    console.log(`Recordatorio automático enviado a ${c.paciente}`);
+    const resultado = await enviarWhatsApp(`whatsapp:${c.telefono}`, `Hola ${c.paciente}, te recordamos tu cita el ${formatoLegible(c.fecha, c.hora)}. ¡Te esperamos!`);
+    if (resultado.ok) {
+      db.marcarRecordatorioEnviado(c.id);
+      console.log(`Recordatorio automático enviado a ${c.paciente}`);
+      enviados.push(c);
+    } else {
+      console.error(`No se pudo enviar recordatorio a ${c.paciente}, se reintentará en la próxima corrida`);
+    }
   }
-  return pendientesRecordatorio;
+  return enviados;
 }
 
-cron.schedule("*/15 * * * *", correrRecordatorios);
+cron.schedule("*/15 * * * *", async () => {
+  try {
+    await correrRecordatorios();
+  } catch (err) {
+    console.error("Error en la corrida de recordatorios automáticos:", err);
+  }
+});
 
 // ================= Rutas API (para el panel / pruebas) =================
 
