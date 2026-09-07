@@ -28,6 +28,13 @@ db.exec(`
     duracion_slot INTEGER NOT NULL DEFAULT 30 -- minutos
   );
 
+  CREATE TABLE IF NOT EXISTS negocio_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    nombre TEXT NOT NULL DEFAULT 'Mi Negocio',
+    servicios TEXT NOT NULL DEFAULT '',
+    direccion TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS sessions (
     phone TEXT PRIMARY KEY,
     state TEXT NOT NULL,
@@ -57,6 +64,20 @@ if (config.n === 0) {
   ];
   const tx = db.transaction(rows => rows.forEach(r => insert.run(...r)));
   tx(defaults);
+}
+
+// Info del negocio: fila única (id=1). Dummy por defecto para poder hacer
+// demos de inmediato — se reemplaza con datos reales del cliente vía
+// /api/negocio cuando haya uno (ver actualizarNegocio()).
+const negocioExistente = db.prepare("SELECT COUNT(*) as n FROM negocio_config").get();
+if (negocioExistente.n === 0) {
+  db.prepare(`
+    INSERT INTO negocio_config (id, nombre, servicios, direccion) VALUES (1, ?, ?, ?)
+  `).run(
+    "Bella Estética",
+    "Corte y peinado, manicure, pedicure, faciales, depilación con cera",
+    "Av. Reforma 123, Ciudad de México"
+  );
 }
 
 // ---------- Citas ----------
@@ -205,6 +226,24 @@ function citasParaRecordatorio(horasAntes = 24) {
   });
 }
 
+// ---------- Info del negocio (nombre/servicios/dirección) ----------
+
+function obtenerNegocio() {
+  return db.prepare("SELECT * FROM negocio_config WHERE id = 1").get();
+}
+
+function actualizarNegocio({ nombre, servicios, direccion }) {
+  const actual = obtenerNegocio();
+  db.prepare(`
+    UPDATE negocio_config SET nombre = ?, servicios = ?, direccion = ? WHERE id = 1
+  `).run(
+    nombre != null ? nombre : actual.nombre,
+    servicios != null ? servicios : actual.servicios,
+    direccion != null ? direccion : actual.direccion
+  );
+  return obtenerNegocio();
+}
+
 // ---------- Sesiones de conversación (una fila por teléfono) ----------
 
 function getSession(phone) {
@@ -264,4 +303,5 @@ module.exports = {
   disponibilidad, horaEstaDisponible, proximosDiasConDisponibilidad,
   citasParaRecordatorio, backup,
   getSession, saveSession, eliminarSession,
+  obtenerNegocio, actualizarNegocio,
 };

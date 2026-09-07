@@ -19,6 +19,28 @@ const SLOT_PEDIDO = {
   CONFIRM: "confirmación (sí/no) de los datos que ya se le mostraron",
 };
 
+const DIAS_LARGOS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+
+// ---------- Info del negocio / preguntas frecuentes ----------
+
+function formatearHorarios() {
+  const abiertos = db.listarConfigHorario().filter(c => c.activo);
+  if (abiertos.length === 0) return "Por ahora no tengo el horario a la mano.";
+  return abiertos.map(c => `${DIAS_LARGOS[c.dia_semana]}: ${c.hora_inicio} a ${c.hora_fin}`).join("\n");
+}
+
+function responderPreguntaComun(tema) {
+  const negocio = db.obtenerNegocio();
+  if (tema === "horarios") return `Nuestro horario:\n${formatearHorarios()}`;
+  if (tema === "servicios") return `Ofrecemos: ${negocio.servicios}.`;
+  if (tema === "ubicacion") {
+    return negocio.direccion
+      ? `Estamos en ${negocio.direccion}.`
+      : "No tengo la dirección a la mano ahorita — contáctanos directamente para confirmarla.";
+  }
+  return "No tengo esa información a la mano ahorita.";
+}
+
 // ---------- Construcción de ofertas (listas con ids) ----------
 
 function construirOfertaFechas(desde) {
@@ -127,14 +149,16 @@ async function manejarMensajePaciente(from, textoOriginal) {
       ? !["greet", "cancel", "ask_question"].includes(extracted.intent)
       : /cita|agendar|agénda|reservar|consulta|quiero/i.test(texto);
 
+    const negocio = db.obtenerNegocio();
+
     if (!quiereAgendar) {
       if (extracted && extracted.intent === "ask_question") {
-        return "No tengo esa información a la mano ahorita, pero con gusto te ayudo a ver los horarios disponibles — escribe \"cita\" cuando quieras.";
+        return `${responderPreguntaComun(extracted.tema_pregunta)}\n\n¿Te gustaría agendar una cita? Escribe "cita".`;
       }
       if (extracted && extracted.intent === "cancel") {
         return "Sin problema. Escribe \"cita\" cuando quieras agendar.";
       }
-      return "¡Hola! ¿En qué te puedo ayudar? Si quieres agendar una cita, dime \"cita\" y con gusto te ayudo a encontrar un horario.";
+      return `¡Hola! Bienvenido a ${negocio.nombre}. ¿En qué te puedo ayudar? Si quieres agendar una cita, dime "cita" y con gusto te ayudo a encontrar un horario.`;
     }
 
     const nueva = sesionFresca(from);
@@ -144,7 +168,7 @@ async function manejarMensajePaciente(from, textoOriginal) {
     }
     nueva.offered = offered;
     guardar(nueva);
-    return `¡Hola! Con gusto te agendamos.\n\n${mensajeFechas(offered)}`;
+    return `¡Hola! Bienvenido a ${negocio.nombre}. Con gusto te agendamos.\n\n${mensajeFechas(offered)}`;
   }
 
   // --- Con sesión activa ---
@@ -171,7 +195,7 @@ async function manejarMensajePaciente(from, textoOriginal) {
   // Pregunta fuera de flujo: se responde y se repite lo pendiente, sin perder el estado
   if (extracted && extracted.intent === "ask_question" && session.state !== "CONFIRM") {
     guardar(session);
-    return `No tengo esa información a la mano ahorita.\n\n${preguntaPendiente(session.state, session)}`;
+    return `${responderPreguntaComun(extracted.tema_pregunta)}\n\n${preguntaPendiente(session.state, session)}`;
   }
 
   // Corrección: solo tiene sentido en estados donde ya hay una fecha/hora

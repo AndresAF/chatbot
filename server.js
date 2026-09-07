@@ -214,6 +214,19 @@ app.post("/api/horario", (req, res) => {
   res.json(actualizado);
 });
 
+// Nombre/servicios/dirección del negocio — ver el bot los usa para
+// contestar preguntas comunes (ver pacienteFlow.js). Trae datos dummy por
+// defecto; actualízalos aquí cuando haya un cliente real, ej:
+// curl -X POST .../api/negocio -H "Content-Type: application/json" \
+//   -d '{"nombre":"...", "servicios":"...", "direccion":"..."}'
+app.get("/api/negocio", (req, res) => res.json(db.obtenerNegocio()));
+
+app.post("/api/negocio", (req, res) => {
+  const { nombre, servicios, direccion } = req.body;
+  const actualizado = db.actualizarNegocio({ nombre, servicios, direccion });
+  res.json(actualizado);
+});
+
 // Simular chat de recepción (sin WhatsApp real)
 app.post("/api/simular-recepcion", async (req, res) => {
   const { mensaje } = req.body;

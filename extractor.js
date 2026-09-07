@@ -46,9 +46,14 @@ async function extraer({ mensaje, estado, slotPedido, offered, ahora, timezone }
             confidence: {
               type: "number",
               description: "Qué tan seguro estás de option_id/raw_value, de 0 a 1. Si es ambiguo, usa un número bajo (<0.5) y option_id null."
+            },
+            tema_pregunta: {
+              type: "string",
+              enum: ["horarios", "servicios", "ubicacion", "otro", "ninguno"],
+              description: "SOLO relevante si intent es ask_question: de qué trata la pregunta. 'horarios' (a qué hora abren/cierran, qué días trabajan), 'servicios' (qué ofrecen), 'ubicacion' (dónde están), 'otro' (cualquier otra cosa, ej. precios). 'ninguno' si intent no es ask_question."
             }
           },
-          required: ["intent", "option_id", "raw_value", "name", "confidence"],
+          required: ["intent", "option_id", "raw_value", "name", "confidence", "tema_pregunta"],
           additionalProperties: false
         },
         strict: true
