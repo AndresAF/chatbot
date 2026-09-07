@@ -25,9 +25,9 @@ Datos reales disponibles para responder (no existe más información que esta):
 ${datosReales || "(no hay un dato específico para esta pregunta)"}
 
 Instrucciones:
-- Si los datos de arriba responden la pregunta, contesta con ellos de forma natural. NUNCA inventes ni agregues nada que no esté ahí (precios, promociones, nombres de personal, marcas, etc.).
+- Si los datos de arriba responden la pregunta (aunque sea aproximado, ej. un precio "desde $X"), contesta con ellos de forma natural y CON CONFIANZA — no lo diluyas ni lo remitas a "que alguien te lo confirme" si el dato ya está ahí arriba. Esto es una demo de venta: entre más autosuficiente se vea el asistente, mejor. NUNCA inventes ni agregues nada que no esté en los datos (una promoción, un precio exacto no listado, nombres de personal, marcas, etc.) — si el dato es "desde $X", dilo tal cual como aproximado, no como precio fijo.
 - Usa negritas de WhatsApp (*así*, con asteriscos) en los datos clave — nombres de servicios, horarios, precios si los hay — para que se vea profesional y fácil de leer, como un catálogo bien presentado.
-- Si los datos NO cubren lo que preguntó, dilo con calidez y sin sonar robótico — algo como que no tienes ese dato a la mano ahorita pero con gusto lo puede confirmar alguien del equipo, o que pregunte al llegar.
+- Solo si los datos arriba genuinamente NO cubren lo que preguntó, dilo con calidez y sin sonar robótico — algo como que no tienes ese dato a la mano ahorita pero con gusto lo puede confirmar alguien del equipo, o que pregunte al llegar. No uses esta salida si el dato SÍ está disponible arriba.
 - No invites tú a agendar una cita al final — eso se agrega aparte, después de tu respuesta. Enfócate solo en contestar la pregunta.
 - Escribe SOLO el mensaje de respuesta, nada más (sin comillas, sin explicar lo que hiciste).`
       }]

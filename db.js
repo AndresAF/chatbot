@@ -75,7 +75,7 @@ if (negocioExistente.n === 0) {
     INSERT INTO negocio_config (id, nombre, servicios, direccion) VALUES (1, ?, ?, ?)
   `).run(
     "Bella Estética",
-    "Corte y peinado, manicure, pedicure, faciales, depilación con cera",
+    "Corte y peinado (desde $250), Manicure (desde $150), Pedicure (desde $180), Faciales (desde $400), Depilación con cera (desde $300)",
     "Av. Reforma 123, Ciudad de México"
   );
 }

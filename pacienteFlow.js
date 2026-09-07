@@ -37,13 +37,15 @@ function formatearHorarios() {
 async function responderPreguntaComun(pregunta, tema) {
   const negocio = db.obtenerNegocio();
 
-  let datosReales = null;
-  if (tema === "horarios") datosReales = `Horario:\n${formatearHorarios()}`;
-  else if (tema === "servicios") datosReales = `Servicios que ofrecemos: ${negocio.servicios}`;
-  else if (tema === "ubicacion" && negocio.direccion) datosReales = `Dirección: ${negocio.direccion}`;
-  // tema "otro"/"ninguno" (ej. precios) o ubicación sin dirección configurada:
-  // datosReales queda null a propósito — el redactor sabe que no hay dato
-  // específico y debe responder con calidez sin inventar nada.
+  // Los servicios/precios se incluyen SIEMPRE como contexto disponible —
+  // muchas preguntas de "otro" (ej. "cuánto cuesta X") en realidad se
+  // responden con este mismo dato, y clasificarlas como "servicios" vs.
+  // "otro" es ambiguo incluso para el extractor. Horario/ubicación se
+  // agregan encima solo si aplican a la pregunta.
+  const partes = [`Servicios y precios: ${negocio.servicios}`];
+  if (tema === "horarios") partes.push(`Horario:\n${formatearHorarios()}`);
+  if (tema === "ubicacion" && negocio.direccion) partes.push(`Dirección: ${negocio.direccion}`);
+  const datosReales = partes.join("\n");
 
   const redactada = await redactarRespuesta({ pregunta, datosReales, nombreNegocio: negocio.nombre });
   if (redactada) return redactada;
@@ -120,6 +122,12 @@ function sesionFresca(phone) {
   };
 }
 
+// Sesión "liviana": ya se saludó, pero todavía no decide agendar (solo
+// preguntó algo). No forma parte de la máquina de estados de agendado.
+function sesionChateando(phone) {
+  return { ...sesionFresca(phone), state: "CHATTING", slots: { date: null, time: null, name: null } };
+}
+
 function cargarSesion(phone) {
   const s = db.getSession(phone);
   if (!s) return null;
@@ -166,8 +174,14 @@ async function manejarMensajePaciente(from, textoOriginal) {
 
   let session = cargarSesion(from);
 
-  // --- Sin sesión: arranque de conversación ---
-  if (!session) {
+  // --- Sin sesión, o ya se saludó pero aún no empieza a agendar ---
+  // (CHATTING existe solo para no repetir "¡Hola! Bienvenido a X" cada vez
+  // que alguien pregunta algo antes de decidirse a agendar — sin esto, cada
+  // pregunta fuera de flujo hacía que la siguiente respuesta reiniciara la
+  // conversación desde cero como si nunca hubiera saludado.)
+  if (!session || session.state === "CHATTING") {
+    const yaSaludado = !!session;
+
     const extracted = await extraer({
       mensaje: texto,
       estado: "GREET",
@@ -184,6 +198,9 @@ async function manejarMensajePaciente(from, textoOriginal) {
     const negocio = db.obtenerNegocio();
 
     if (!quiereAgendar) {
+      const chateando = session || sesionChateando(from);
+      guardar(chateando);
+
       if (extracted && extracted.intent === "ask_question") {
         const respuesta = await responderPreguntaComun(texto, extracted.tema_pregunta);
         return `${respuesta}\n\n¿Te gustaría agendar una cita? Escribe "cita".`;
@@ -191,7 +208,9 @@ async function manejarMensajePaciente(from, textoOriginal) {
       if (extracted && extracted.intent === "cancel") {
         return "Sin problema. Escribe \"cita\" cuando quieras agendar.";
       }
-      return `¡Hola! Bienvenido a *${negocio.nombre}*. ¿En qué te puedo ayudar? Si quieres agendar una cita, dime "cita" y con gusto te ayudo a encontrar un horario.`;
+      return yaSaludado
+        ? "¿En qué te puedo ayudar? Si quieres agendar una cita, dime \"cita\"."
+        : `¡Hola! Bienvenido a *${negocio.nombre}*. ¿En qué te puedo ayudar? Si quieres agendar una cita, dime "cita" y con gusto te ayudo a encontrar un horario.`;
     }
 
     const nueva = sesionFresca(from);
@@ -201,7 +220,8 @@ async function manejarMensajePaciente(from, textoOriginal) {
     }
     nueva.offered = offered;
     guardar(nueva);
-    return `¡Hola! Bienvenido a *${negocio.nombre}*. Con gusto te agendamos.\n\n${mensajeFechas(offered)}`;
+    const saludo = yaSaludado ? "¡Perfecto!" : `¡Hola! Bienvenido a *${negocio.nombre}*.`;
+    return `${saludo} Con gusto te agendamos.\n\n${mensajeFechas(offered)}`;
   }
 
   // --- Con sesión activa ---
