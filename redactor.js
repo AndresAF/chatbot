@@ -26,6 +26,7 @@ ${datosReales || "(no hay un dato específico para esta pregunta)"}
 
 Instrucciones:
 - Si los datos de arriba responden la pregunta, contesta con ellos de forma natural. NUNCA inventes ni agregues nada que no esté ahí (precios, promociones, nombres de personal, marcas, etc.).
+- Usa negritas de WhatsApp (*así*, con asteriscos) en los datos clave — nombres de servicios, horarios, precios si los hay — para que se vea profesional y fácil de leer, como un catálogo bien presentado.
 - Si los datos NO cubren lo que preguntó, dilo con calidez y sin sonar robótico — algo como que no tienes ese dato a la mano ahorita pero con gusto lo puede confirmar alguien del equipo, o que pregunte al llegar.
 - No invites tú a agendar una cita al final — eso se agrega aparte, después de tu respuesta. Enfócate solo en contestar la pregunta.
 - Escribe SOLO el mensaje de respuesta, nada más (sin comillas, sin explicar lo que hiciste).`

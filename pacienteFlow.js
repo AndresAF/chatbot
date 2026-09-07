@@ -47,9 +47,9 @@ async function responderPreguntaComun(pregunta, tema) {
   const redactada = await redactarRespuesta({ pregunta, datosReales, nombreNegocio: negocio.nombre });
   if (redactada) return redactada;
 
-  if (tema === "horarios") return `Nuestro horario:\n${formatearHorarios()}`;
-  if (tema === "servicios") return `Ofrecemos: ${negocio.servicios}.`;
-  if (tema === "ubicacion" && negocio.direccion) return `Estamos en ${negocio.direccion}.`;
+  if (tema === "horarios") return `*Nuestro horario:*\n${formatearHorarios()}`;
+  if (tema === "servicios") return `Ofrecemos: *${negocio.servicios}*.`;
+  if (tema === "ubicacion" && negocio.direccion) return `Estamos en *${negocio.direccion}*.`;
   return "No tengo ese dato a la mano ahorita, pero con gusto te puede ayudar alguien del equipo.";
 }
 
@@ -79,13 +79,13 @@ function construirOfertaHoras(fechaISO) {
 // ---------- Mensajes (plantilla — nunca los redacta el LLM) ----------
 
 function mensajeFechas(offered) {
-  const lineas = offered.options.map(o => `${o.id}) ${o.label}`);
+  const lineas = offered.options.map(o => `*${o.id})* ${o.label}`);
   return `¿Qué día te gustaría venir?\n${lineas.join("\n")}`;
 }
 
 function mensajeHoras(fechaISO, offered) {
-  const lineas = offered.options.map(o => `${o.id}) ${o.value}`);
-  return `Para ${formatoLegible(fechaISO, "")} tengo:\n${lineas.join("  ")}\n\n¿Cuál te acomoda? (o dime otra hora si prefieres)`;
+  const lineas = offered.options.map(o => `*${o.id})* ${o.value}`);
+  return `Para *${formatoLegible(fechaISO, "")}* tengo:\n${lineas.join("   ")}\n\n¿Cuál te acomoda? (o dime otra hora si prefieres)`;
 }
 
 function mensajeNombre() {
@@ -93,7 +93,7 @@ function mensajeNombre() {
 }
 
 function mensajeConfirmacion(slots) {
-  return `Te confirmo:\n📅 ${formatoLegible(slots.date, slots.time)}\n👤 ${slots.name}\n\n¿Está bien? Responde SÍ para confirmar.`;
+  return `Te confirmo:\n📅 *${formatoLegible(slots.date, slots.time)}*\n👤 *${slots.name}*\n\n¿Está bien? Responde *SÍ* para confirmar.`;
 }
 
 function preguntaPendiente(state, session) {
@@ -171,7 +171,7 @@ async function manejarMensajePaciente(from, textoOriginal) {
       if (extracted && extracted.intent === "cancel") {
         return "Sin problema. Escribe \"cita\" cuando quieras agendar.";
       }
-      return `¡Hola! Bienvenido a ${negocio.nombre}. ¿En qué te puedo ayudar? Si quieres agendar una cita, dime "cita" y con gusto te ayudo a encontrar un horario.`;
+      return `¡Hola! Bienvenido a *${negocio.nombre}*. ¿En qué te puedo ayudar? Si quieres agendar una cita, dime "cita" y con gusto te ayudo a encontrar un horario.`;
     }
 
     const nueva = sesionFresca(from);
@@ -181,7 +181,7 @@ async function manejarMensajePaciente(from, textoOriginal) {
     }
     nueva.offered = offered;
     guardar(nueva);
-    return `¡Hola! Bienvenido a ${negocio.nombre}. Con gusto te agendamos.\n\n${mensajeFechas(offered)}`;
+    return `¡Hola! Bienvenido a *${negocio.nombre}*. Con gusto te agendamos.\n\n${mensajeFechas(offered)}`;
   }
 
   // --- Con sesión activa ---
