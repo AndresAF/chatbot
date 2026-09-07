@@ -35,6 +35,14 @@ function extraerDia(texto) {
 }
 
 function interpretar(mensajeOriginal) {
+  // Relevo directo a un cliente ("responde a +52...: mensaje"): se detecta
+  // sobre el texto ORIGINAL (sin limpiar) para no perder mayúsculas/acentos
+  // del mensaje que se va a mandar tal cual.
+  const matchResponder = mensajeOriginal.match(/^(?:responde|responder|manda|env[ií]a)(?:le)?\s+a\s+(\+?\d{10,15})\s*:\s*([\s\S]+)$/i);
+  if (matchResponder) {
+    return { intent: "RESPONDER", telefono: matchResponder[1], mensaje: matchResponder[2].trim(), raw: mensajeOriginal };
+  }
+
   const texto = limpiar(mensajeOriginal);
 
   if (/cancela|cancelar/.test(texto)) {

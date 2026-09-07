@@ -55,6 +55,17 @@ app.post("/webhook/whatsapp", async (req, res) => {
 const pendientes = {}; // { from: { intent, citaId, resumen, fecha?, hora? } }
 
 async function manejarRecepcion(from, body) {
+  // Relevo directo a un cliente: funciona siempre, sin pedir confirmación
+  // (es solo mandar tus propias palabras tal cual) y sin importar si hay
+  // otra acción pendiente — es independiente del flujo de agendado.
+  const posibleRelevo = interpretar(body);
+  if (posibleRelevo.intent === "RESPONDER") {
+    const r = await enviarWhatsApp(`whatsapp:${posibleRelevo.telefono}`, posibleRelevo.mensaje);
+    return r.ok
+      ? `Mensaje enviado a ${posibleRelevo.telefono}.`
+      : `No se pudo enviar el mensaje a ${posibleRelevo.telefono} (falló el envío) — intenta de nuevo en un momento.`;
+  }
+
   if (pendientes[from]) {
     const accion = interpretar(body);
     if (accion.intent === "CONFIRMAR") {
@@ -72,7 +83,7 @@ async function manejarRecepcion(from, body) {
   const accion = interpretar(body);
 
   if (accion.intent === "DESCONOCIDO") {
-    return "No entendí el comando. Prueba con:\n• \"cancela la cita de [nombre]\"\n• \"cambia la cita de [nombre] al [día] [hora]\"\n• \"envía recordatorio a [nombre]\"";
+    return "No entendí el comando. Prueba con:\n• \"cancela la cita de [nombre]\"\n• \"cambia la cita de [nombre] al [día] [hora]\"\n• \"envía recordatorio a [nombre]\"\n• \"responde a +52...: tu mensaje\" (para hablarle directo a un cliente)";
   }
   if (!accion.nombre) {
     return "No identifiqué el nombre del paciente. ¿Puedes repetirlo incluyendo el nombre completo?";
