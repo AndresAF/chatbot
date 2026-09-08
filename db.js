@@ -47,6 +47,13 @@ db.exec(`
   );
 `);
 
+// Migración: agrega cita_id a `sessions` si la tabla ya existía de antes sin
+// esa columna (permite reagendar una cita existente en vez de crear otra).
+const columnasSessions = db.prepare("PRAGMA table_info(sessions)").all().map(c => c.name);
+if (!columnasSessions.includes("cita_id")) {
+  db.exec("ALTER TABLE sessions ADD COLUMN cita_id INTEGER");
+}
+
 // Configuración default: Lunes a Viernes 9:00-18:00, sábado 9:00-14:00, slots de 30 min.
 // El consultorio la puede cambiar después (endpoint /api/horario).
 const config = db.prepare("SELECT COUNT(*) as n FROM horario_config").get();
@@ -105,6 +112,12 @@ function buscarPorNombre(nombreParcial) {
 
 function obtenerCita(id) {
   return db.prepare("SELECT * FROM citas WHERE id = ?").get(id);
+}
+
+// Un mismo teléfono no puede tener más de una cita activa a la vez — se usa
+// para forzar "solo puedes cambiar tu cita" en vez de crear una duplicada.
+function buscarCitaActivaPorTelefono(telefono) {
+  return db.prepare("SELECT * FROM citas WHERE telefono = ? AND estado = 'confirmada' ORDER BY fecha, hora LIMIT 1").get(telefono);
 }
 
 function cancelarCita(id) {
@@ -170,14 +183,15 @@ function slotsDelDia(fechaISO) {
 }
 
 // Slots disponibles = slots teóricos - slots ya ocupados (citas confirmadas)
-// - ya pasados (si la fecha consultada es hoy)
-function disponibilidad(fechaISO) {
+// - ya pasados (si la fecha consultada es hoy). `excluirCitaId` se usa al
+// reagendar: el slot que ya ocupa esa misma cita no debe verse como "tomado".
+function disponibilidad(fechaISO, excluirCitaId = null) {
   const todos = slotsDelDia(fechaISO);
   if (todos.length === 0) return { abierto: false, slots: [] };
 
   const ocupadas = db.prepare(`
-    SELECT hora FROM citas WHERE fecha = ? AND estado = 'confirmada'
-  `).all(fechaISO).map(r => r.hora);
+    SELECT hora FROM citas WHERE fecha = ? AND estado = 'confirmada' AND id != ?
+  `).all(fechaISO, excluirCitaId || -1).map(r => r.hora);
 
   let libres = todos.filter(s => !ocupadas.includes(s));
 
@@ -194,19 +208,19 @@ function disponibilidad(fechaISO) {
   return { abierto: true, slots: libres };
 }
 
-function horaEstaDisponible(fechaISO, hora) {
-  const { abierto, slots } = disponibilidad(fechaISO);
+function horaEstaDisponible(fechaISO, hora, excluirCitaId = null) {
+  const { abierto, slots } = disponibilidad(fechaISO, excluirCitaId);
   return abierto && slots.includes(hora);
 }
 
 // Próximos N días con al menos un slot libre (útil para sugerirle al paciente)
-function proximosDiasConDisponibilidad(n = 5, desde = new Date()) {
+function proximosDiasConDisponibilidad(n = 5, desde = new Date(), excluirCitaId = null) {
   const resultado = [];
   let cursor = new Date(desde);
   let intentos = 0;
   while (resultado.length < n && intentos < 30) {
     const iso = cursor.toISOString().slice(0, 10);
-    const { abierto, slots } = disponibilidad(iso);
+    const { abierto, slots } = disponibilidad(iso, excluirCitaId);
     if (abierto && slots.length > 0) {
       resultado.push({ fecha: iso, slots });
     }
@@ -254,6 +268,7 @@ function getSession(phone) {
     state: row.state,
     slots: JSON.parse(row.slots),
     offered: row.offered ? JSON.parse(row.offered) : null,
+    citaId: row.cita_id != null ? row.cita_id : null,
     attempts: row.attempts,
     last_message_at: row.last_message_at,
     locale: row.locale,
@@ -263,12 +278,13 @@ function getSession(phone) {
 
 function saveSession(session) {
   db.prepare(`
-    INSERT INTO sessions (phone, state, slots, offered, attempts, last_message_at, locale, timezone)
-    VALUES (@phone, @state, @slots, @offered, @attempts, @last_message_at, @locale, @timezone)
+    INSERT INTO sessions (phone, state, slots, offered, cita_id, attempts, last_message_at, locale, timezone)
+    VALUES (@phone, @state, @slots, @offered, @cita_id, @attempts, @last_message_at, @locale, @timezone)
     ON CONFLICT(phone) DO UPDATE SET
       state = excluded.state,
       slots = excluded.slots,
       offered = excluded.offered,
+      cita_id = excluded.cita_id,
       attempts = excluded.attempts,
       last_message_at = excluded.last_message_at,
       locale = excluded.locale,
@@ -278,6 +294,7 @@ function saveSession(session) {
     state: session.state,
     slots: JSON.stringify(session.slots),
     offered: session.offered ? JSON.stringify(session.offered) : null,
+    cita_id: session.citaId != null ? session.citaId : null,
     attempts: session.attempts || 0,
     last_message_at: session.last_message_at || new Date().toISOString(),
     locale: session.locale || "es-MX",
@@ -298,6 +315,7 @@ function backup(destino) {
 
 module.exports = {
   listarCitas, listarActivas, buscarPorNombre, obtenerCita,
+  buscarCitaActivaPorTelefono,
   cancelarCita, reagendarCita, crearCita, marcarRecordatorioEnviado,
   getConfigDia, actualizarConfigDia, listarConfigHorario,
   disponibilidad, horaEstaDisponible, proximosDiasConDisponibilidad,

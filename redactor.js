@@ -40,4 +40,32 @@ Instrucciones:
   }
 }
 
-module.exports = { redactarRespuesta };
+// Cuando el núcleo no logra resolver la respuesta del cliente contra las
+// opciones YA ofrecidas (ver nucleo.resolveFromOffered), en vez de repetir
+// un mensaje genérico de "no entendí" se le pide a Claude que interprete el
+// texto libre y explique con calidez cómo responder — usando SOLO las
+// opciones reales que se le pasan (nunca inventa disponibilidad nueva).
+async function explicarComoResponder({ textoUsuario, loQueSeEspera, opciones, nombreNegocio }) {
+  try {
+    const respuesta = await anthropic.messages.create({
+      model: "claude-haiku-4-5",
+      max_tokens: 150,
+      messages: [{
+        role: "user",
+        content: `Eres el asistente de WhatsApp de "${nombreNegocio}", agendando una cita. El cliente escribió: "${textoUsuario}" y no logramos identificar ${loQueSeEspera} a partir de eso.
+
+Opciones válidas ahora mismo (son las únicas reales, no inventes otras ni disponibilidad nueva):
+${opciones}
+
+Escribe un mensaje breve (máximo 2-3 líneas), cálido y claro, en español de México, que le explique amablemente que no le entendiste bien y cómo puede responder correctamente — usando SOLO esas opciones (ej. el número de la opción, o el día/hora tal cual aparece arriba). No repitas la lista completa de opciones (eso se muestra aparte). No expliques lo que hiciste, escribe solo el mensaje.`
+      }]
+    });
+    const bloque = respuesta.content.find(b => b.type === "text");
+    return bloque && bloque.text.trim() ? bloque.text.trim() : null;
+  } catch (err) {
+    console.error("Error en explicarComoResponder (Claude):", err.message);
+    return null;
+  }
+}
+
+module.exports = { redactarRespuesta, explicarComoResponder };

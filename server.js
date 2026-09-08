@@ -34,13 +34,14 @@ const NUMERO_RECEPCION = process.env.NUMERO_RECEPCION || "";
 app.post("/webhook/whatsapp", async (req, res) => {
   const from = req.body.From;
   const body = (req.body.Body || "").trim();
+  const profileName = req.body.ProfileName;
   const esRecepcion = NUMERO_RECEPCION && from === `whatsapp:${NUMERO_RECEPCION}`;
 
   let respuesta;
   try {
     respuesta = esRecepcion
       ? await manejarRecepcion(from, body)
-      : await manejarMensajePaciente(from, body);
+      : await manejarMensajePaciente(from, body, profileName);
   } catch (err) {
     console.error("Error procesando mensaje entrante:", err);
     respuesta = "Tuvimos un problema técnico procesando tu mensaje. Por favor intenta de nuevo en un momento.";

@@ -7,7 +7,7 @@ const db = require("./db");
 const { formatoLegible, toISO } = require("./dateutils");
 const { esMensajeInapropiado, pideHumano } = require("./iaChat");
 const { extraer } = require("./extractor");
-const { redactarRespuesta } = require("./redactor");
+const { redactarRespuesta, explicarComoResponder } = require("./redactor");
 const { enviarWhatsApp } = require("./whatsapp");
 const nucleo = require("./nucleo");
 
@@ -58,14 +58,14 @@ async function responderPreguntaComun(pregunta, tema) {
 
 // ---------- Construcción de ofertas (listas con ids) ----------
 
-function construirOfertaFechas(desde) {
-  const dias = db.proximosDiasConDisponibilidad(3, desde);
+function construirOfertaFechas(desde, excluirCitaId = null) {
+  const dias = db.proximosDiasConDisponibilidad(3, desde, excluirCitaId);
   const options = dias.map((d, i) => ({ id: i + 1, label: formatoLegible(d.fecha, ""), value: d.fecha }));
   return { kind: "dates", generated_at: new Date().toISOString(), options };
 }
 
-function construirOfertaHoras(fechaISO) {
-  const { slots } = db.disponibilidad(fechaISO);
+function construirOfertaHoras(fechaISO, excluirCitaId = null) {
+  const { slots } = db.disponibilidad(fechaISO, excluirCitaId);
   const manana = slots.filter(s => parseInt(s.split(":")[0], 10) < 13);
   const tarde = slots.filter(s => parseInt(s.split(":")[0], 10) >= 13);
   const muestrear = (arr, n) => {
@@ -88,22 +88,25 @@ function mensajeFechas(offered) {
 
 function mensajeHoras(fechaISO, offered) {
   const lineas = offered.options.map(o => `*${o.id})* ${o.value}`);
-  return `¡Buena elección! Para *${formatoLegible(fechaISO, "")}* tengo estos horarios libres:\n${lineas.join("   ")}\n\n¿Cuál te acomoda mejor? (si ninguno te late, dime otra hora y vemos)`;
+  return `¡Buena elección! Para *${formatoLegible(fechaISO, "")}* tengo estos horarios libres:\n${lineas.join("\n")}\n\n¿Cuál te acomoda mejor? (si ninguno te late, dime otra hora y vemos)`;
 }
 
 function mensajeNombre() {
   return "¡Ya casi terminamos! ¿A nombre de quién agendamos la cita?";
 }
 
-function mensajeConfirmacion(slots) {
-  return `¡Perfecto! Déjame confirmar los detalles antes de agendar:\n📅 *${formatoLegible(slots.date, slots.time)}*\n👤 *${slots.name}*\n\n¿Todo correcto? Responde *SÍ* para confirmar tu cita.`;
+function mensajeConfirmacion(slots, esCambio) {
+  const encabezado = esCambio
+    ? "¡Perfecto! Déjame confirmar el cambio antes de actualizar tu cita:"
+    : "¡Perfecto! Déjame confirmar los detalles antes de agendar:";
+  return `${encabezado}\n📅 *${formatoLegible(slots.date, slots.time)}*\n👤 *${slots.name}*\n\n¿Todo correcto? Responde *SÍ* para confirmar.`;
 }
 
 function preguntaPendiente(state, session) {
   if (state === "ASK_DATE") return mensajeFechas(session.offered);
   if (state === "ASK_TIME") return mensajeHoras(session.slots.date, session.offered);
   if (state === "ASK_NAME") return mensajeNombre();
-  if (state === "CONFIRM") return mensajeConfirmacion(session.slots);
+  if (state === "CONFIRM") return mensajeConfirmacion(session.slots, !!session.citaId);
   return "¿Seguimos con tu cita? Escríbeme \"cita\" cuando quieras empezar.";
 }
 
@@ -115,6 +118,7 @@ function sesionFresca(phone) {
     state: "ASK_DATE",
     slots: { date: null, time: null, name: null },
     offered: null,
+    citaId: null, // si ya tenía una cita activa, esto la reagenda en vez de crear una nueva
     attempts: 0,
     last_message_at: new Date().toISOString(),
     locale: "es-MX",
@@ -146,8 +150,19 @@ function guardar(session) {
 
 // ---------- Orquestación principal ----------
 
-async function manejarMensajePaciente(from, textoOriginal) {
+// profileName: nombre del perfil de WhatsApp del remitente (Twilio lo manda
+// como "ProfileName" en cada mensaje) — se usa solo para saludar por su
+// nombre, nunca para nada que afecte la lógica de agendado.
+function primerNombreDePerfil(profileName) {
+  const limpio = (profileName || "").trim();
+  if (!limpio || limpio.length > 30) return null;
+  if (!/^[a-zA-ZÀ-ÿ\s'.-]+$/.test(limpio)) return null; // evita emojis/nombres de negocio raros
+  return limpio.split(/\s+/)[0];
+}
+
+async function manejarMensajePaciente(from, textoOriginal, profileName) {
   const texto = (textoOriginal || "").trim();
+  const primerNombre = primerNombreDePerfil(profileName);
 
   if (esMensajeInapropiado(texto)) {
     return "Por favor mantengamos la conversación enfocada en agendar tu cita. Escribe \"cita\" cuando quieras continuar.";
@@ -210,18 +225,30 @@ async function manejarMensajePaciente(from, textoOriginal) {
       }
       return yaSaludado
         ? "¿En qué más te puedo ayudar? Si quieres agendar una cita, dime \"cita\"."
-        : `¡Hola! 👋 Bienvenido a *${negocio.nombre}*. ¿En qué te puedo ayudar? Si quieres agendar una cita, dime "cita" y con gusto te ayudo a encontrar un horario.`;
+        : `¡Hola${primerNombre ? ", " + primerNombre : ""}! 👋 Bienvenido a *${negocio.nombre}*. ¿En qué te puedo ayudar? Si quieres agendar una cita, dime "cita" y con gusto te ayudo a encontrar un horario.`;
     }
 
+    // Un mismo número no puede tener dos citas activas — si ya tiene una,
+    // este flujo la reagenda (nueva fecha/hora) en vez de crear una nueva.
+    const telefono = from.replace("whatsapp:", "");
+    const citaExistente = db.buscarCitaActivaPorTelefono(telefono);
+
     const nueva = sesionFresca(from);
-    const offered = construirOfertaFechas(new Date());
+    if (citaExistente) {
+      nueva.citaId = citaExistente.id;
+      nueva.slots.name = citaExistente.paciente;
+    }
+    const offered = construirOfertaFechas(new Date(), nueva.citaId);
     if (offered.options.length === 0) {
       return "¡Gracias por escribirnos! Por ahora no tenemos horarios disponibles próximamente, pero en breve nos pondremos en contacto contigo.";
     }
     nueva.offered = offered;
     guardar(nueva);
-    const saludo = yaSaludado ? "¡Perfecto!" : `¡Hola! 👋 Bienvenido a *${negocio.nombre}*.`;
-    return `${saludo} Con gusto te agendamos.\n\n${mensajeFechas(offered)}`;
+    const saludo = yaSaludado ? "¡Perfecto!" : `¡Hola${primerNombre ? ", " + primerNombre : ""}! 👋 Bienvenido a *${negocio.nombre}*.`;
+    const intro = citaExistente
+      ? `Veo que ya tienes una cita para el *${formatoLegible(citaExistente.fecha, citaExistente.hora)}*. Vamos a cambiarla — dime la nueva fecha que te acomode.`
+      : "Con gusto te agendamos.";
+    return `${saludo} ${intro}\n\n${mensajeFechas(offered)}`;
   }
 
   // --- Con sesión activa ---
@@ -284,11 +311,11 @@ function manejarHandoffSiAplica(session) {
   return null;
 }
 
-function manejarAskDate(session, extracted, texto) {
+async function manejarAskDate(session, extracted, texto) {
   const raw = extracted || { option_id: null, raw_value: texto };
   const fechaISO = nucleo.resolveFromOffered(raw, session.offered);
   const hoyISO = toISO(new Date());
-  const disponibilidad = fechaISO ? db.disponibilidad(fechaISO) : { abierto: false, slots: [] };
+  const disponibilidad = fechaISO ? db.disponibilidad(fechaISO, session.citaId) : { abierto: false, slots: [] };
   const { verdict, reason } = nucleo.validarFecha(fechaISO, disponibilidad, hoyISO);
 
   registrarIntento(session, verdict);
@@ -296,7 +323,7 @@ function manejarAskDate(session, extracted, texto) {
   if (verdict === "ACCEPT") {
     session.slots.date = fechaISO;
     session.state = "ASK_TIME";
-    session.offered = construirOfertaHoras(fechaISO);
+    session.offered = construirOfertaHoras(fechaISO, session.citaId);
     guardar(session);
     return mensajeHoras(fechaISO, session.offered);
   }
@@ -309,23 +336,43 @@ function manejarAskDate(session, extracted, texto) {
     return `Esa fecha ya pasó, pero no hay problema — ${mensajeFechas(session.offered)}`;
   }
   if (reason === "closed" || reason === "full") {
-    session.offered = construirOfertaFechas(new Date());
+    session.offered = construirOfertaFechas(new Date(), session.citaId);
     guardar(session);
     return `Uy, ese día ya no tengo espacio. ${mensajeFechas(session.offered)}`;
   }
-  return `No logré identificar bien el día 🤔 ${mensajeFechas(session.offered)}`;
+
+  // No se logró identificar ningún día en el texto: en vez de un mensaje
+  // fijo, se le pide a Claude que interprete lo que escribió y explique con
+  // calidez cómo responder — usando solo las fechas reales ya ofrecidas.
+  const negocio = db.obtenerNegocio();
+  const opciones = session.offered.options.map(o => `${o.id}) ${o.label}`).join("\n");
+  const explicacion = await explicarComoResponder({
+    textoUsuario: texto, loQueSeEspera: "qué día quiere para su cita",
+    opciones, nombreNegocio: negocio.nombre,
+  });
+  return explicacion
+    ? `${explicacion}\n\n${mensajeFechas(session.offered)}`
+    : `No logré identificar bien el día 🤔 ${mensajeFechas(session.offered)}`;
 }
 
-function manejarAskTime(session, extracted, texto) {
+async function manejarAskTime(session, extracted, texto) {
   const raw = extracted || { option_id: null, raw_value: texto };
   const horaResuelta = nucleo.resolveFromOffered(raw, session.offered);
-  const disponible = horaResuelta ? db.horaEstaDisponible(session.slots.date, horaResuelta) : false;
-  const { verdict } = nucleo.validarHora(horaResuelta, disponible);
+  const disponible = horaResuelta ? db.horaEstaDisponible(session.slots.date, horaResuelta, session.citaId) : false;
+  const { verdict, reason } = nucleo.validarHora(horaResuelta, disponible);
 
   registrarIntento(session, verdict);
 
   if (verdict === "ACCEPT") {
     session.slots.time = horaResuelta;
+    // Si ya veníamos reagendando una cita existente, ya tenemos el nombre —
+    // no hace falta volver a pedirlo, se salta directo a confirmar.
+    if (session.citaId && session.slots.name) {
+      session.state = "CONFIRM";
+      session.offered = null;
+      guardar(session);
+      return mensajeConfirmacion(session.slots, true);
+    }
     session.state = "ASK_NAME";
     session.offered = null;
     guardar(session);
@@ -336,8 +383,23 @@ function manejarAskTime(session, extracted, texto) {
   if (handoff) return handoff;
 
   guardar(session);
-  const { slots } = db.disponibilidad(session.slots.date);
-  return `Esa hora ya no está disponible, pero tengo estas libres ese día: ${slots.join(", ") || "ninguno"}. ¿Cuál te acomoda?`;
+
+  if (reason === "full") {
+    const { slots } = db.disponibilidad(session.slots.date, session.citaId);
+    return `Esa hora ya no está disponible, pero tengo estas libres ese día: ${slots.join(", ") || "ninguno"}. ¿Cuál te acomoda?`;
+  }
+
+  // No se logró identificar ninguna hora en el texto: se le pide a Claude
+  // que interprete y guíe, usando solo las horas reales ya ofrecidas.
+  const negocio = db.obtenerNegocio();
+  const opciones = session.offered.options.map(o => `${o.id}) ${o.value}`).join("\n");
+  const explicacion = await explicarComoResponder({
+    textoUsuario: texto, loQueSeEspera: "qué hora quiere para su cita",
+    opciones, nombreNegocio: negocio.nombre,
+  });
+  return explicacion
+    ? `${explicacion}\n\n${mensajeHoras(session.slots.date, session.offered)}`
+    : `No logré identificar bien la hora 🤔 ${mensajeHoras(session.slots.date, session.offered)}`;
 }
 
 function manejarAskName(session, extracted, texto) {
@@ -363,16 +425,22 @@ function manejarAskName(session, extracted, texto) {
 function manejarConfirm(session, extracted, texto) {
   if (nucleo.esConfirmacion(texto)) {
     // Re-chequeo real de disponibilidad justo antes de escribir (pudo ocuparse mientras tanto)
-    if (!db.horaEstaDisponible(session.slots.date, session.slots.time)) {
+    if (!db.horaEstaDisponible(session.slots.date, session.slots.time, session.citaId)) {
       session.state = "ASK_TIME";
-      session.offered = construirOfertaHoras(session.slots.date);
+      session.offered = construirOfertaHoras(session.slots.date, session.citaId);
       session.attempts = 0;
       guardar(session);
       return `¡Uy! Justo se ocupó ese horario mientras confirmábamos. ${mensajeHoras(session.slots.date, session.offered)}`;
     }
-    const telefono = session.phone.replace("whatsapp:", "");
-    db.crearCita({ paciente: session.slots.name, telefono, fecha: session.slots.date, hora: session.slots.time });
-    const resumen = `✅ ¡Listo! Tu cita quedó agendada para el ${formatoLegible(session.slots.date, session.slots.time)}. Te mandaremos un recordatorio antes de que llegue el día. ¡Nos vemos pronto!`;
+    let resumen;
+    if (session.citaId) {
+      db.reagendarCita(session.citaId, session.slots.date, session.slots.time);
+      resumen = `✅ ¡Listo! Tu cita quedó actualizada para el ${formatoLegible(session.slots.date, session.slots.time)}. ¡Nos vemos pronto!`;
+    } else {
+      const telefono = session.phone.replace("whatsapp:", "");
+      db.crearCita({ paciente: session.slots.name, telefono, fecha: session.slots.date, hora: session.slots.time });
+      resumen = `✅ ¡Listo! Tu cita quedó agendada para el ${formatoLegible(session.slots.date, session.slots.time)}. Te mandaremos un recordatorio antes de que llegue el día. ¡Nos vemos pronto!`;
+    }
     db.eliminarSession(session.phone);
     return resumen;
   }
@@ -389,19 +457,19 @@ function manejarConfirm(session, extracted, texto) {
 // Intenta reinterpretar la corrección como una fecha nueva primero, luego
 // como una hora nueva para la fecha actual; si no resuelve nada, solo
 // re-pregunta lo pendiente sin avanzar ni inventar un cambio.
-function manejarCorreccion(session, extracted, texto) {
+async function manejarCorreccion(session, extracted, texto) {
   const raw = extracted || { option_id: null, raw_value: texto };
 
-  const ofertaFechas = construirOfertaFechas(new Date());
+  const ofertaFechas = construirOfertaFechas(new Date(), session.citaId);
   const fechaNueva = nucleo.resolveFromOffered(raw, ofertaFechas);
   if (fechaNueva) {
-    const disponibilidad = db.disponibilidad(fechaNueva);
+    const disponibilidad = db.disponibilidad(fechaNueva, session.citaId);
     if (disponibilidad.abierto && disponibilidad.slots.length > 0) {
       const cambioFecha = fechaNueva !== session.slots.date;
       session.slots.date = fechaNueva;
       session.slots.time = null;
       session.state = "ASK_TIME";
-      session.offered = construirOfertaHoras(fechaNueva);
+      session.offered = construirOfertaHoras(fechaNueva, session.citaId);
       session.attempts = 0;
       guardar(session);
       const prefijo = cambioFecha ? "¡Va, anoto el cambio!" : "¡Entendido, seguimos con esa fecha!";
@@ -410,26 +478,45 @@ function manejarCorreccion(session, extracted, texto) {
   }
 
   if (session.slots.date) {
-    const ofertaHoras = construirOfertaHoras(session.slots.date);
+    const ofertaHoras = construirOfertaHoras(session.slots.date, session.citaId);
     const horaNueva = nucleo.resolveFromOffered(raw, ofertaHoras);
-    if (horaNueva && db.horaEstaDisponible(session.slots.date, horaNueva)) {
+    if (horaNueva && db.horaEstaDisponible(session.slots.date, horaNueva, session.citaId)) {
       const cambioHora = horaNueva !== session.slots.time;
       session.slots.time = horaNueva;
+      session.attempts = 0;
+      const prefijo = cambioHora ? "¡Va, anoto el cambio!" : "¡Entendido, seguimos con esa hora!";
+      if (session.citaId && session.slots.name) {
+        session.state = "CONFIRM";
+        session.offered = null;
+        guardar(session);
+        return `${prefijo} ${mensajeConfirmacion(session.slots, true)}`;
+      }
       session.state = "ASK_NAME";
       session.offered = null;
-      session.attempts = 0;
       guardar(session);
-      const prefijo = cambioHora ? "¡Va, anoto el cambio!" : "¡Entendido, seguimos con esa hora!";
       return `${prefijo} ${mensajeNombre()}`;
     }
   }
 
-  // No se pudo resolver nada nuevo: no avanza, solo re-pregunta
+  // No se pudo resolver nada nuevo: no avanza. En vez de un mensaje fijo, se
+  // le pide a Claude que interprete el texto y explique con calidez qué tipo
+  // de respuesta se espera, usando solo los datos reales ya decididos.
   registrarIntento(session, "CLARIFY");
   const handoff = manejarHandoffSiAplica(session);
   if (handoff) return handoff;
   guardar(session);
-  return `Disculpa, ¿me lo confirmas una vez más? ${preguntaPendiente(session.state, session)}`;
+
+  const negocio = db.obtenerNegocio();
+  const opciones = session.offered && session.offered.options
+    ? session.offered.options.map(o => `${o.id}) ${o.label || o.value}`).join("\n")
+    : "(ninguna lista activa — se espera confirmación con sí/no, o corregir la fecha/hora)";
+  const explicacion = await explicarComoResponder({
+    textoUsuario: texto, loQueSeEspera: SLOT_PEDIDO[session.state] || "la información pendiente",
+    opciones, nombreNegocio: negocio.nombre,
+  });
+  return explicacion
+    ? `${explicacion}\n\n${preguntaPendiente(session.state, session)}`
+    : `Disculpa, ¿me lo confirmas una vez más? ${preguntaPendiente(session.state, session)}`;
 }
 
 module.exports = { manejarMensajePaciente };
