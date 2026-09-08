@@ -50,10 +50,10 @@ async function responderPreguntaComun(pregunta, tema) {
   const redactada = await redactarRespuesta({ pregunta, datosReales, nombreNegocio: negocio.nombre });
   if (redactada) return redactada;
 
-  if (tema === "horarios") return `*Nuestro horario:*\n${formatearHorarios()}`;
-  if (tema === "servicios") return `Ofrecemos: *${negocio.servicios}*.`;
-  if (tema === "ubicacion" && negocio.direccion) return `Estamos en *${negocio.direccion}*.`;
-  return "No tengo ese dato a la mano ahorita, pero con gusto te puede ayudar alguien del equipo.";
+  if (tema === "horarios") return `¡Con gusto! *Nuestro horario:*\n${formatearHorarios()}`;
+  if (tema === "servicios") return `¡Claro! Ofrecemos: *${negocio.servicios}*.`;
+  if (tema === "ubicacion" && negocio.direccion) return `¡Con gusto! Estamos en *${negocio.direccion}*.`;
+  return "No tengo ese dato a la mano ahorita, pero con gusto te puede ayudar alguien de nuestro equipo.";
 }
 
 // ---------- Construcción de ofertas (listas con ids) ----------
@@ -83,20 +83,20 @@ function construirOfertaHoras(fechaISO) {
 
 function mensajeFechas(offered) {
   const lineas = offered.options.map(o => `*${o.id})* ${o.label}`);
-  return `¿Qué día te gustaría venir?\n${lineas.join("\n")}`;
+  return `¿Qué día te gustaría venir? Estas son las fechas más próximas con espacio:\n${lineas.join("\n")}`;
 }
 
 function mensajeHoras(fechaISO, offered) {
   const lineas = offered.options.map(o => `*${o.id})* ${o.value}`);
-  return `Para *${formatoLegible(fechaISO, "")}* tengo:\n${lineas.join("   ")}\n\n¿Cuál te acomoda? (o dime otra hora si prefieres)`;
+  return `¡Buena elección! Para *${formatoLegible(fechaISO, "")}* tengo estos horarios libres:\n${lineas.join("   ")}\n\n¿Cuál te acomoda mejor? (si ninguno te late, dime otra hora y vemos)`;
 }
 
 function mensajeNombre() {
-  return "¿A nombre de quién agendamos la cita?";
+  return "¡Ya casi terminamos! ¿A nombre de quién agendamos la cita?";
 }
 
 function mensajeConfirmacion(slots) {
-  return `Te confirmo:\n📅 *${formatoLegible(slots.date, slots.time)}*\n👤 *${slots.name}*\n\n¿Está bien? Responde *SÍ* para confirmar.`;
+  return `¡Perfecto! Déjame confirmar los detalles antes de agendar:\n📅 *${formatoLegible(slots.date, slots.time)}*\n👤 *${slots.name}*\n\n¿Todo correcto? Responde *SÍ* para confirmar tu cita.`;
 }
 
 function preguntaPendiente(state, session) {
@@ -104,7 +104,7 @@ function preguntaPendiente(state, session) {
   if (state === "ASK_TIME") return mensajeHoras(session.slots.date, session.offered);
   if (state === "ASK_NAME") return mensajeNombre();
   if (state === "CONFIRM") return mensajeConfirmacion(session.slots);
-  return "¿Seguimos con tu cita? Escribe \"cita\" si quieres empezar.";
+  return "¿Seguimos con tu cita? Escríbeme \"cita\" cuando quieras empezar.";
 }
 
 // ---------- Sesión ----------
@@ -169,7 +169,7 @@ async function manejarMensajePaciente(from, textoOriginal) {
         `⚠️ Un cliente (${from.replace("whatsapp:", "")}) pidió hablar con una persona. Entra a la conversación de WhatsApp para atenderlo directamente — el bot ya no le va a responder en este chat.`
       );
     }
-    return "Claro, en un momento alguien del equipo te atiende directamente por aquí mismo.";
+    return "¡Claro que sí! En un momento alguien de nuestro equipo te atiende directamente por aquí mismo.";
   }
 
   let session = cargarSesion(from);
@@ -206,17 +206,17 @@ async function manejarMensajePaciente(from, textoOriginal) {
         return `${respuesta}\n\n¿Te gustaría agendar una cita? Escribe "cita".`;
       }
       if (extracted && extracted.intent === "cancel") {
-        return "Sin problema. Escribe \"cita\" cuando quieras agendar.";
+        return "¡Sin problema! Aquí estoy cuando quieras agendar, solo escríbeme \"cita\".";
       }
       return yaSaludado
-        ? "¿En qué te puedo ayudar? Si quieres agendar una cita, dime \"cita\"."
+        ? "¿En qué más te puedo ayudar? Si quieres agendar una cita, dime \"cita\"."
         : `¡Hola! 👋 Bienvenido a *${negocio.nombre}*. ¿En qué te puedo ayudar? Si quieres agendar una cita, dime "cita" y con gusto te ayudo a encontrar un horario.`;
     }
 
     const nueva = sesionFresca(from);
     const offered = construirOfertaFechas(new Date());
     if (offered.options.length === 0) {
-      return "Por ahora no tenemos horarios disponibles próximamente. En breve nos pondremos en contacto contigo.";
+      return "¡Gracias por escribirnos! Por ahora no tenemos horarios disponibles próximamente, pero en breve nos pondremos en contacto contigo.";
     }
     nueva.offered = offered;
     guardar(nueva);
@@ -242,7 +242,7 @@ async function manejarMensajePaciente(from, textoOriginal) {
   const quiereCancelar = extracted ? extracted.intent === "cancel" : /^(cancelar|ya no|olv[ií]dalo|d[eé]jalo)\b/i.test(texto);
   if (quiereCancelar) {
     db.eliminarSession(from);
-    return "Sin problema, cancelé el proceso. Escribe \"cita\" cuando quieras intentarlo de nuevo.";
+    return "¡Sin problema! Cancelé el proceso. Escríbeme \"cita\" cuando quieras intentarlo de nuevo.";
   }
 
   // Pregunta fuera de flujo: se responde y se repite lo pendiente, sin perder el estado
@@ -306,14 +306,14 @@ function manejarAskDate(session, extracted, texto) {
 
   guardar(session);
   if (verdict === "REJECT" && reason === "past") {
-    return `Esa fecha ya pasó. ${mensajeFechas(session.offered)}`;
+    return `Esa fecha ya pasó, pero no hay problema — ${mensajeFechas(session.offered)}`;
   }
   if (reason === "closed" || reason === "full") {
     session.offered = construirOfertaFechas(new Date());
     guardar(session);
-    return `Ese día no tenemos espacio. ${mensajeFechas(session.offered)}`;
+    return `Uy, ese día ya no tengo espacio. ${mensajeFechas(session.offered)}`;
   }
-  return `No logré identificar el día. ${mensajeFechas(session.offered)}`;
+  return `No logré identificar bien el día 🤔 ${mensajeFechas(session.offered)}`;
 }
 
 function manejarAskTime(session, extracted, texto) {
@@ -337,7 +337,7 @@ function manejarAskTime(session, extracted, texto) {
 
   guardar(session);
   const { slots } = db.disponibilidad(session.slots.date);
-  return `Esa hora no está disponible. Libres ese día: ${slots.join(", ") || "ninguno"}. ¿Cuál eliges?`;
+  return `Esa hora ya no está disponible, pero tengo estas libres ese día: ${slots.join(", ") || "ninguno"}. ¿Cuál te acomoda?`;
 }
 
 function manejarAskName(session, extracted, texto) {
@@ -357,7 +357,7 @@ function manejarAskName(session, extracted, texto) {
   if (handoff) return handoff;
 
   guardar(session);
-  return "¿Puedes escribir tu nombre completo, por favor?";
+  return "¿Me compartes tu nombre completo, por favor?";
 }
 
 function manejarConfirm(session, extracted, texto) {
@@ -368,18 +368,18 @@ function manejarConfirm(session, extracted, texto) {
       session.offered = construirOfertaHoras(session.slots.date);
       session.attempts = 0;
       guardar(session);
-      return `Justo se ocupó ese horario mientras confirmábamos. ${mensajeHoras(session.slots.date, session.offered)}`;
+      return `¡Uy! Justo se ocupó ese horario mientras confirmábamos. ${mensajeHoras(session.slots.date, session.offered)}`;
     }
     const telefono = session.phone.replace("whatsapp:", "");
     db.crearCita({ paciente: session.slots.name, telefono, fecha: session.slots.date, hora: session.slots.time });
-    const resumen = `✅ ¡Listo! Tu cita quedó agendada para el ${formatoLegible(session.slots.date, session.slots.time)}. Te mandaremos un recordatorio antes. Si necesitas cambiarla, escríbenos.`;
+    const resumen = `✅ ¡Listo! Tu cita quedó agendada para el ${formatoLegible(session.slots.date, session.slots.time)}. Te mandaremos un recordatorio antes de que llegue el día. ¡Nos vemos pronto!`;
     db.eliminarSession(session.phone);
     return resumen;
   }
 
   if (nucleo.esRechazo(texto)) {
     db.eliminarSession(session.phone);
-    return "Sin problema, cancelé el proceso. Escribe \"cita\" cuando quieras intentarlo de nuevo.";
+    return "¡Sin problema! Cancelé el proceso. Escríbeme \"cita\" cuando quieras intentarlo de nuevo.";
   }
 
   // Cualquier otra cosa en CONFIRM se trata como corrección (§8 del spec)
@@ -404,7 +404,7 @@ function manejarCorreccion(session, extracted, texto) {
       session.offered = construirOfertaHoras(fechaNueva);
       session.attempts = 0;
       guardar(session);
-      const prefijo = cambioFecha ? "Perdón, anoto el cambio." : "Perdón, sigo con esa fecha.";
+      const prefijo = cambioFecha ? "¡Va, anoto el cambio!" : "¡Entendido, seguimos con esa fecha!";
       return `${prefijo} ${mensajeHoras(fechaNueva, session.offered)}`;
     }
   }
@@ -419,7 +419,7 @@ function manejarCorreccion(session, extracted, texto) {
       session.offered = null;
       session.attempts = 0;
       guardar(session);
-      const prefijo = cambioHora ? "Perdón, anoto el cambio." : "Perdón, sigo con esa hora.";
+      const prefijo = cambioHora ? "¡Va, anoto el cambio!" : "¡Entendido, seguimos con esa hora!";
       return `${prefijo} ${mensajeNombre()}`;
     }
   }
@@ -429,7 +429,7 @@ function manejarCorreccion(session, extracted, texto) {
   const handoff = manejarHandoffSiAplica(session);
   if (handoff) return handoff;
   guardar(session);
-  return `Perdón, ¿me confirmas de nuevo? ${preguntaPendiente(session.state, session)}`;
+  return `Disculpa, ¿me lo confirmas una vez más? ${preguntaPendiente(session.state, session)}`;
 }
 
 module.exports = { manejarMensajePaciente };

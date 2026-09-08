@@ -131,7 +131,7 @@ async function ejecutarAccion(p) {
 
   if (p.intent === "CANCELAR") {
     db.cancelarCita(cita.id);
-    const r = await enviarWhatsApp(`whatsapp:${cita.telefono}`, `Hola ${cita.paciente}, tu cita del ${formatoLegible(cita.fecha, cita.hora)} ha sido cancelada. Si fue un error, contáctanos.`);
+    const r = await enviarWhatsApp(`whatsapp:${cita.telefono}`, `Hola ${cita.paciente}, tu cita del ${formatoLegible(cita.fecha, cita.hora)} fue cancelada sin problema. Si fue un error o quieres agendar otra fecha, aquí estamos para ayudarte.`);
     return r.ok
       ? `Listo, cancelé la cita de ${cita.paciente} y le avisé por WhatsApp.`
       : `Cancelé la cita de ${cita.paciente} en el sistema, pero no le pude avisar por WhatsApp (falló el envío) — avísale tú por otro medio.`;
