@@ -107,7 +107,7 @@ function preguntaPendiente(state, session) {
   if (state === "ASK_TIME") return mensajeHoras(session.slots.date, session.offered);
   if (state === "ASK_NAME") return mensajeNombre();
   if (state === "CONFIRM") return mensajeConfirmacion(session.slots, !!session.citaId);
-  return "¿Seguimos con tu cita? Escríbeme \"cita\" cuando quieras empezar.";
+  return "¿Seguimos con tu cita? Dime cuando quieras empezar.";
 }
 
 // ---------- Sesión ----------
@@ -165,7 +165,7 @@ async function manejarMensajePaciente(from, textoOriginal, profileName) {
   const primerNombre = primerNombreDePerfil(profileName);
 
   if (esMensajeInapropiado(texto)) {
-    return "Por favor mantengamos la conversación enfocada en agendar tu cita. Escribe \"cita\" cuando quieras continuar.";
+    return "Por favor mantengamos la conversación enfocada en agendar tu cita. Dime cuando quieras continuar.";
   }
 
   // Pide hablar con una persona: el bot se calla de inmediato (sin esperar
@@ -206,9 +206,17 @@ async function manejarMensajePaciente(from, textoOriginal, profileName) {
       timezone: TIMEZONE,
     });
 
-    const quiereAgendar = extracted
-      ? !["greet", "cancel", "ask_question"].includes(extracted.intent)
-      : /cita|agendar|agénda|reservar|consulta|quiero/i.test(texto);
+    // No se exige ninguna palabra mágica ("cita") para empezar a agendar:
+    // el bot siempre termina sus respuestas preguntando si quiere agendar, y
+    // aquí se acepta una afirmación natural (sí/va/dale) a esa pregunta, o
+    // que la persona lo pida explícitamente por su cuenta en cualquier
+    // momento. Cualquier otra cosa (incluido nombrar solo un servicio, como
+    // "Faciales") NO se toma como intención de agendar — se responde con
+    // información real y se vuelve a preguntar, en vez de saltar de golpe
+    // al flujo de agendado y perder el hilo de la conversación.
+    const dijoQueSi = nucleo.esConfirmacion(texto) || (extracted && extracted.intent === "confirm");
+    const pidioExplicitamente = /\b(agendar|agenda|cita|reservar|reservaci[oó]n|apartar)\b/i.test(texto);
+    const quiereAgendar = dijoQueSi || pidioExplicitamente;
 
     const negocio = db.obtenerNegocio();
 
@@ -216,16 +224,19 @@ async function manejarMensajePaciente(from, textoOriginal, profileName) {
       const chateando = session || sesionChateando(from);
       guardar(chateando);
 
-      if (extracted && extracted.intent === "ask_question") {
-        const respuesta = await responderPreguntaComun(texto, extracted.tema_pregunta);
-        return `${respuesta}\n\n¿Te gustaría agendar una cita? Escribe "cita".`;
+      const bienvenida = !yaSaludado ? `¡Hola${primerNombre ? ", " + primerNombre : ""}! 👋 Bienvenido a *${negocio.nombre}*. ` : "";
+
+      const dijoQueNo = nucleo.esRechazo(texto) || (extracted && extracted.intent === "cancel");
+      if (dijoQueNo) {
+        return `${bienvenida}¡Sin problema! Aquí estoy cuando quieras. Nada más dime y con gusto te ayudo a agendar.`;
       }
-      if (extracted && extracted.intent === "cancel") {
-        return "¡Sin problema! Aquí estoy cuando quieras agendar, solo escríbeme \"cita\".";
+
+      if (extracted && extracted.intent === "greet") {
+        return `${bienvenida}¿En qué te puedo ayudar? ¿Te gustaría agendar una cita?`;
       }
-      return yaSaludado
-        ? "¿En qué más te puedo ayudar? Si quieres agendar una cita, dime \"cita\"."
-        : `¡Hola${primerNombre ? ", " + primerNombre : ""}! 👋 Bienvenido a *${negocio.nombre}*. ¿En qué te puedo ayudar? Si quieres agendar una cita, dime "cita" y con gusto te ayudo a encontrar un horario.`;
+
+      const respuesta = await responderPreguntaComun(texto, (extracted && extracted.tema_pregunta) || "otro");
+      return `${bienvenida}${respuesta}\n\n¿Te gustaría agendar una cita?`;
     }
 
     // Un mismo número no puede tener dos citas activas — si ya tiene una,
@@ -269,7 +280,7 @@ async function manejarMensajePaciente(from, textoOriginal, profileName) {
   const quiereCancelar = extracted ? extracted.intent === "cancel" : /^(cancelar|ya no|olv[ií]dalo|d[eé]jalo)\b/i.test(texto);
   if (quiereCancelar) {
     db.eliminarSession(from);
-    return "¡Sin problema! Cancelé el proceso. Escríbeme \"cita\" cuando quieras intentarlo de nuevo.";
+    return "¡Sin problema! Cancelé el proceso. Dime cuando quieras intentarlo de nuevo.";
   }
 
   // Pregunta fuera de flujo: se responde y se repite lo pendiente, sin perder el estado
@@ -295,7 +306,7 @@ async function manejarMensajePaciente(from, textoOriginal, profileName) {
 
   // Estado desconocido: reinicia con seguridad
   db.eliminarSession(from);
-  return "Vamos a empezar de nuevo. Escribe \"cita\" si quieres agendar.";
+  return "Vamos a empezar de nuevo. Dime si quieres agendar una cita.";
 }
 
 function registrarIntento(session, verdict) {
@@ -447,7 +458,7 @@ function manejarConfirm(session, extracted, texto) {
 
   if (nucleo.esRechazo(texto)) {
     db.eliminarSession(session.phone);
-    return "¡Sin problema! Cancelé el proceso. Escríbeme \"cita\" cuando quieras intentarlo de nuevo.";
+    return "¡Sin problema! Cancelé el proceso. Dime cuando quieras intentarlo de nuevo.";
   }
 
   // Cualquier otra cosa en CONFIRM se trata como corrección (§8 del spec)
