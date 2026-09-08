@@ -47,11 +47,15 @@ db.exec(`
   );
 `);
 
-// Migración: agrega cita_id a `sessions` si la tabla ya existía de antes sin
-// esa columna (permite reagendar una cita existente en vez de crear otra).
+// Migración: agrega columnas a `sessions` si la tabla ya existía de antes sin
+// ellas. cita_id permite reagendar una cita existente en vez de crear otra;
+// reminder_sent evita mandar más de un recordatorio por abandono de sesión.
 const columnasSessions = db.prepare("PRAGMA table_info(sessions)").all().map(c => c.name);
 if (!columnasSessions.includes("cita_id")) {
   db.exec("ALTER TABLE sessions ADD COLUMN cita_id INTEGER");
+}
+if (!columnasSessions.includes("reminder_sent")) {
+  db.exec("ALTER TABLE sessions ADD COLUMN reminder_sent INTEGER NOT NULL DEFAULT 0");
 }
 
 // Configuración default: Lunes a Viernes 9:00-18:00, sábado 9:00-14:00, slots de 30 min.
@@ -81,7 +85,7 @@ if (negocioExistente.n === 0) {
   db.prepare(`
     INSERT INTO negocio_config (id, nombre, servicios, direccion) VALUES (1, ?, ?, ?)
   `).run(
-    "Bella Estética",
+    "Salón Bella",
     "Corte y peinado (desde $250), Manicure (desde $150), Pedicure (desde $180), Faciales (desde $400), Depilación con cera (desde $300)",
     "Av. Reforma 123, Ciudad de México"
   );
@@ -269,6 +273,7 @@ function getSession(phone) {
     slots: JSON.parse(row.slots),
     offered: row.offered ? JSON.parse(row.offered) : null,
     citaId: row.cita_id != null ? row.cita_id : null,
+    reminderSent: !!row.reminder_sent,
     attempts: row.attempts,
     last_message_at: row.last_message_at,
     locale: row.locale,
@@ -278,13 +283,14 @@ function getSession(phone) {
 
 function saveSession(session) {
   db.prepare(`
-    INSERT INTO sessions (phone, state, slots, offered, cita_id, attempts, last_message_at, locale, timezone)
-    VALUES (@phone, @state, @slots, @offered, @cita_id, @attempts, @last_message_at, @locale, @timezone)
+    INSERT INTO sessions (phone, state, slots, offered, cita_id, reminder_sent, attempts, last_message_at, locale, timezone)
+    VALUES (@phone, @state, @slots, @offered, @cita_id, @reminder_sent, @attempts, @last_message_at, @locale, @timezone)
     ON CONFLICT(phone) DO UPDATE SET
       state = excluded.state,
       slots = excluded.slots,
       offered = excluded.offered,
       cita_id = excluded.cita_id,
+      reminder_sent = excluded.reminder_sent,
       attempts = excluded.attempts,
       last_message_at = excluded.last_message_at,
       locale = excluded.locale,
@@ -295,6 +301,7 @@ function saveSession(session) {
     slots: JSON.stringify(session.slots),
     offered: session.offered ? JSON.stringify(session.offered) : null,
     cita_id: session.citaId != null ? session.citaId : null,
+    reminder_sent: session.reminderSent ? 1 : 0,
     attempts: session.attempts || 0,
     last_message_at: session.last_message_at || new Date().toISOString(),
     locale: session.locale || "es-MX",
@@ -305,6 +312,28 @@ function saveSession(session) {
 
 function eliminarSession(phone) {
   db.prepare("DELETE FROM sessions WHERE phone = ?").run(phone);
+}
+
+// Sesiones de agendado (no de charla/handoff) que llevan >= `minutos` sin
+// actividad y todavía no recibieron su recordatorio de abandono.
+function sesionesParaRecordatorioDeAgenda(minutos = 5) {
+  const limite = new Date(Date.now() - minutos * 60 * 1000).toISOString();
+  const rows = db.prepare(`
+    SELECT * FROM sessions
+    WHERE state IN ('ASK_DATE', 'ASK_TIME', 'ASK_NAME', 'CONFIRM')
+      AND reminder_sent = 0
+      AND last_message_at <= ?
+  `).all(limite);
+  return rows.map(row => ({
+    phone: row.phone,
+    state: row.state,
+    slots: JSON.parse(row.slots),
+    citaId: row.cita_id != null ? row.cita_id : null,
+  }));
+}
+
+function marcarRecordatorioDeAgendaEnviado(phone) {
+  db.prepare("UPDATE sessions SET reminder_sent = 1 WHERE phone = ?").run(phone);
 }
 
 // Genera una copia consistente del archivo SQLite (usa la API de backup
@@ -321,5 +350,6 @@ module.exports = {
   disponibilidad, horaEstaDisponible, proximosDiasConDisponibilidad,
   citasParaRecordatorio, backup,
   getSession, saveSession, eliminarSession,
+  sesionesParaRecordatorioDeAgenda, marcarRecordatorioDeAgendaEnviado,
   obtenerNegocio, actualizarNegocio,
 };

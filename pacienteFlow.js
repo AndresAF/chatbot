@@ -145,7 +145,27 @@ function cargarSesion(phone) {
 
 function guardar(session) {
   session.last_message_at = new Date().toISOString();
+  // El cliente acaba de escribir, así que cualquier recordatorio de abandono
+  // pendiente ya no aplica — si vuelve a quedarse callado, se le manda uno nuevo.
+  session.reminderSent = false;
   db.saveSession(session);
+}
+
+// Mensaje de "¿sigues ahí?" cuando el cliente deja de responder a la mitad
+// del agendado (ver correrRecordatoriosDeAgenda en server.js). Nunca se usa
+// fuera de los estados de agendado (nunca por solo saludar o preguntar algo).
+function mensajeRecordatorioAgenda(session) {
+  const { date, time, name } = session.slots;
+  if (session.state === "CONFIRM") {
+    return `¿Sigues ahí? 🙂 Nada más faltaba que confirmaras tu cita del *${formatoLegible(date, time)}* a nombre de *${name}*. ¿Quieres seguir con el agendado o prefieres dejarlo por ahora? Sin problema cualquiera de las dos, aquí sigo cuando quieras retomarlo.`;
+  }
+  if (session.state === "ASK_NAME") {
+    return `¿Sigues ahí? 🙂 Ya casi terminábamos tu cita para el *${formatoLegible(date, time)}* — solo faltaba tu nombre. ¿Seguimos o prefieres dejarlo por ahora? Aquí sigo cuando quieras retomarlo.`;
+  }
+  if (session.state === "ASK_TIME") {
+    return `¿Sigues ahí? 🙂 Íbamos agendando tu cita para el *${formatoLegible(date, "")}* — ¿qué hora te acomoda? Si prefieres dejarlo por ahora, sin problema, aquí sigo cuando quieras retomarlo.`;
+  }
+  return "¿Sigues ahí? 🙂 Íbamos a agendar tu cita — ¿qué día te gustaría? Si prefieres dejarlo por ahora, sin problema, aquí sigo cuando quieras retomarlo.";
 }
 
 // ---------- Orquestación principal ----------
@@ -530,4 +550,4 @@ async function manejarCorreccion(session, extracted, texto) {
     : `Disculpa, ¿me lo confirmas una vez más? ${preguntaPendiente(session.state, session)}`;
 }
 
-module.exports = { manejarMensajePaciente };
+module.exports = { manejarMensajePaciente, mensajeRecordatorioAgenda };

@@ -7,7 +7,7 @@ const cron = require("node-cron");
 const db = require("./db");
 const { interpretar } = require("./parser");
 const { parsearFecha, parsearHora, formatoLegible } = require("./dateutils");
-const { manejarMensajePaciente } = require("./pacienteFlow");
+const { manejarMensajePaciente, mensajeRecordatorioAgenda } = require("./pacienteFlow");
 const { enviarWhatsApp, estaConfigurado } = require("./whatsapp");
 
 // Red de seguridad: un error inesperado en cualquier parte (una llamada a
@@ -181,6 +181,35 @@ cron.schedule("*/15 * * * *", async () => {
     await correrRecordatorios();
   } catch (err) {
     console.error("Error en la corrida de recordatorios automáticos:", err);
+  }
+});
+
+// ================= Recordatorio de agendado abandonado =================
+// Si alguien deja de responder a la mitad de agendar (eligiendo fecha, hora,
+// dando su nombre o confirmando) se le manda UN recordatorio amable a los 5
+// minutos de silencio, invitándolo a seguir o a dejarlo por ahora. Nunca
+// aplica fuera de esos estados (charla libre, FAQ, handoff a humano quedan
+// excluidos — ver db.sesionesParaRecordatorioDeAgenda).
+async function correrRecordatoriosDeAgenda() {
+  const abandonadas = db.sesionesParaRecordatorioDeAgenda(5);
+  const enviados = [];
+  for (const s of abandonadas) {
+    const resultado = await enviarWhatsApp(s.phone, mensajeRecordatorioAgenda(s));
+    if (resultado.ok) {
+      db.marcarRecordatorioDeAgendaEnviado(s.phone);
+      enviados.push(s);
+    } else {
+      console.error(`No se pudo enviar recordatorio de agendado a ${s.phone}, se reintentará en la próxima corrida`);
+    }
+  }
+  return enviados;
+}
+
+cron.schedule("*/1 * * * *", async () => {
+  try {
+    await correrRecordatoriosDeAgenda();
+  } catch (err) {
+    console.error("Error en la corrida de recordatorios de agendado abandonado:", err);
   }
 });
 
