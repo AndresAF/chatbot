@@ -11,7 +11,16 @@ const { redactarRespuesta, explicarComoResponder } = require("./redactor");
 const { enviarWhatsApp } = require("./whatsapp");
 const nucleo = require("./nucleo");
 
-const SESION_EXPIRA_MS = 24 * 60 * 60 * 1000; // 24h de silencio -> se reinicia
+// Cuánto silencio hace que una sesión se considere abandonada y se reinicie
+// desde cero. Un agendado a medias (o una charla vieja) no debe seguir
+// "atrapando" la conversación días después si la persona ya se olvidó y
+// solo vuelve a saludar. HANDOFF es la excepción: ahí un humano ya tomó el
+// control, así que se le da mucho más margen para no hacer que el bot
+// vuelva a responder solo y se cruce con esa persona.
+const SESION_EXPIRA_MS = {
+  HANDOFF: 24 * 60 * 60 * 1000, // 24h
+  DEFAULT: 2 * 60 * 60 * 1000,  // 2h — agendado abandonado o charla vieja
+};
 const TIMEZONE = "America/Mexico_City";
 
 const SLOT_PEDIDO = {
@@ -135,8 +144,9 @@ function sesionChateando(phone) {
 function cargarSesion(phone) {
   const s = db.getSession(phone);
   if (!s) return null;
+  const limite = SESION_EXPIRA_MS[s.state] || SESION_EXPIRA_MS.DEFAULT;
   const ultima = s.last_message_at ? new Date(s.last_message_at).getTime() : 0;
-  if (Date.now() - ultima > SESION_EXPIRA_MS) {
+  if (Date.now() - ultima > limite) {
     db.eliminarSession(phone);
     return null;
   }
