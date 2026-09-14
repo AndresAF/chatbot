@@ -350,13 +350,18 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
         : "";
       const bienvenida = !yaSaludado ? `¡Hola${primerNombre ? ", " + primerNombre : ""}! 👋 Bienvenido a *${negocio.nombre}*.${recordatorioCita} ` : "";
 
+      // Si ya tiene una cita, no tiene sentido invitarlo a "agendar una
+      // cita" (como si no tuviera ninguna) — en su lugar se le pregunta si
+      // tiene dudas sobre la que ya tiene.
+      const invitacionTexto = citaExistente ? "¿Tienes alguna duda sobre tu cita?" : "¿Te gustaría agendar una cita?";
+
       const dijoQueNo = nucleo.esRechazo(texto) || (extracted && extracted.intent === "cancel");
       if (dijoQueNo) {
         return `${bienvenida}¡Sin problema! Aquí estoy cuando quieras.`;
       }
 
       if (extracted && extracted.intent === "greet") {
-        const invitacion = invitarAgendar ? " ¿Te gustaría agendar una cita?" : "";
+        const invitacion = invitarAgendar ? ` ${invitacionTexto}` : "";
         return `${bienvenida}¿En qué te puedo ayudar?${invitacion}`;
       }
 
@@ -365,7 +370,7 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
       // cita (eso se agrega aparte), a veces lo hace de todos modos — si su
       // respuesta ya toca el tema, no se duplica la pregunta.
       const yaMencionaCita = /\bcitas?\b/i.test(respuesta);
-      const invitacion = invitarAgendar && !yaMencionaCita ? "\n\n¿Te gustaría agendar una cita?" : "";
+      const invitacion = invitarAgendar && !yaMencionaCita ? `\n\n${invitacionTexto}` : "";
       return `${bienvenida}${respuesta}${invitacion}`;
     }
 
