@@ -180,7 +180,18 @@ function primerNombreDePerfil(profileName) {
   return limpio.split(/\s+/)[0];
 }
 
+// Wrapper: agrega un ❤️ a la respuesta cuando el mensaje del cliente fue de
+// agradecimiento/entusiasmo (ver nucleo.esMensajePositivo). Envuelve toda la
+// lógica real en vez de tocar cada punto de retorno por separado.
 async function manejarMensajePaciente(from, textoOriginal, profileName) {
+  const respuesta = await procesarMensajePaciente(from, textoOriginal, profileName);
+  if (respuesta && nucleo.esMensajePositivo(textoOriginal)) {
+    return `${respuesta} ❤️`;
+  }
+  return respuesta;
+}
+
+async function procesarMensajePaciente(from, textoOriginal, profileName) {
   const texto = (textoOriginal || "").trim();
   const primerNombre = primerNombreDePerfil(profileName);
 

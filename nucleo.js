@@ -53,6 +53,21 @@ function esRechazo(textoOriginal) {
   return /^no\b/.test(normalizar(textoOriginal || ""));
 }
 
+// Mensajes de agradecimiento/entusiasmo — no dispara nada del flujo, solo se
+// usa para decidir si el bot agrega un ❤️ a su respuesta (ver pacienteFlow.js).
+// No hay reacciones nativas de WhatsApp disponibles vía la API de Twilio que
+// usa este proyecto (se investigó a fondo: ni el recurso Message para
+// enviar, ni los parámetros de webhook entrantes, mencionan "reaction" en
+// ninguna forma), así que esto es el equivalente en texto.
+const PALABRAS_POSITIVAS = /\b(gracias|genial|excelente|perfecto|buenisimo|increible|maravilloso|fantastico|de lujo|me encanta|encantador|muy bien|que bien|todo bien|justo lo que (necesitaba|buscaba))\b/;
+const EMOJIS_POSITIVOS = /[❤💕🥰😍🙏👍🎉]/u;
+
+function esMensajePositivo(textoOriginal) {
+  const texto = textoOriginal || "";
+  if (EMOJIS_POSITIVOS.test(texto)) return true;
+  return PALABRAS_POSITIVAS.test(normalizar(texto));
+}
+
 // Resuelve la respuesta del cliente contra las opciones YA ofrecidas — nunca
 // vuelve a interpretar una fecha/hora libremente si hay una lista sobre la
 // mesa. Devuelve el `value` (fecha ISO u hora 24h) o null si no coincide.
@@ -133,7 +148,7 @@ function validarNombre(nombre) {
 
 module.exports = {
   REQUIRED, canEnter, firstMissingState,
-  esCorreccion, esConfirmacion, esRechazo,
+  esCorreccion, esConfirmacion, esRechazo, esMensajePositivo,
   resolveFromOffered, validarFecha, validarHora, validarNombre,
   normalizar,
 };
