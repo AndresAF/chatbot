@@ -88,7 +88,7 @@ function mensajeFechas(offered) {
 
 function mensajeHoras(fechaISO, offered) {
   const lineas = offered.options.map(o => `*${o.id})* ${o.value}`);
-  return `¡Buena elección! Para *${formatoLegible(fechaISO, "")}* tengo estos horarios libres:\n${lineas.join("\n")}\n\n¿Cuál te acomoda mejor? (si ninguno te late, dime otra hora y vemos)`;
+  return `¡Buena elección! Para *${formatoLegible(fechaISO, "")}* tengo estos horarios libres:\n${lineas.join("\n")}\n\n¿Cuál te acomoda? (o dime otra hora)`;
 }
 
 function mensajeNombre() {
@@ -253,21 +253,30 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
 
     if (!quiereAgendar) {
       const chateando = session || sesionChateando(from);
+
+      // No se pregunta "¿quieres agendar?" en cada mensaje — solo en el
+      // primer contacto y luego cada 3 turnos de charla, para que la
+      // conversación fluya sin sentirse insistente.
+      const turnoAnterior = chateando.slots.faqTurnos || 0;
+      chateando.slots.faqTurnos = turnoAnterior + 1;
+      const invitarAgendar = turnoAnterior === 0 || chateando.slots.faqTurnos % 3 === 0;
       guardar(chateando);
 
       const bienvenida = !yaSaludado ? `¡Hola${primerNombre ? ", " + primerNombre : ""}! 👋 Bienvenido a *${negocio.nombre}*. ` : "";
 
       const dijoQueNo = nucleo.esRechazo(texto) || (extracted && extracted.intent === "cancel");
       if (dijoQueNo) {
-        return `${bienvenida}¡Sin problema! Aquí estoy cuando quieras. Nada más dime y con gusto te ayudo a agendar.`;
+        return `${bienvenida}¡Sin problema! Aquí estoy cuando quieras.`;
       }
 
       if (extracted && extracted.intent === "greet") {
-        return `${bienvenida}¿En qué te puedo ayudar? ¿Te gustaría agendar una cita?`;
+        const invitacion = invitarAgendar ? " ¿Te gustaría agendar una cita?" : "";
+        return `${bienvenida}¿En qué te puedo ayudar?${invitacion}`;
       }
 
       const respuesta = await responderPreguntaComun(texto, (extracted && extracted.tema_pregunta) || "otro");
-      return `${bienvenida}${respuesta}\n\n¿Te gustaría agendar una cita?`;
+      const invitacion = invitarAgendar ? "\n\n¿Te gustaría agendar una cita?" : "";
+      return `${bienvenida}${respuesta}${invitacion}`;
     }
 
     // Un mismo número no puede tener dos citas activas — si ya tiene una,
