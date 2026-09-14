@@ -8,8 +8,11 @@ const anthropic = new Anthropic();
 
 const DIAS_ES = ["domingo", "lunes", "martes", "miercoles", "jueves", "viernes", "sabado"];
 
-// { mensaje, estado, slotPedido, offered, ahora, timezone } -> objeto extraído, o null si falla.
-async function extraer({ mensaje, estado, slotPedido, offered, ahora, timezone }) {
+// { mensaje, estado, slotPedido, offered, ahora, timezone, notas } -> objeto extraído, o null si falla.
+// `notas`: contexto extra de una sola línea para casos puntuales (ej. avisar
+// que ya se invitó a agendar hace un momento, para que momento_para_invitar_cita
+// no insista de inmediato) — opcional, no forma parte del schema.
+async function extraer({ mensaje, estado, slotPedido, offered, ahora, timezone, notas }) {
   const diaSemana = DIAS_ES[ahora.getDay()];
   const opcionesTexto = offered && offered.options && offered.options.length
     ? offered.options.map(o => `- id ${o.id}: "${o.label}" (valor interno ${o.value})`).join("\n")
@@ -51,9 +54,13 @@ async function extraer({ mensaje, estado, slotPedido, offered, ahora, timezone }
               type: "string",
               enum: ["horarios", "servicios", "ubicacion", "otro", "ninguno"],
               description: "SOLO relevante si intent es ask_question: de qué trata la pregunta. 'horarios' (a qué hora abren/cierran, qué días trabajan), 'servicios' (qué ofrecen), 'ubicacion' (dónde están), 'otro' (cualquier otra cosa, ej. precios). 'ninguno' si intent no es ask_question."
+            },
+            momento_para_invitar_cita: {
+              type: "boolean",
+              description: "SOLO relevante si el estado de la conversación es GREET (todavía no se está agendando nada). true si, después de responder este mensaje, es un buen momento natural para invitarlo a agendar una cita (ya se resolvió su duda, hay una pausa natural, muestra interés en un servicio). false si sería brusco o repetitivo insistir ahora (está a media pregunta, encadenando varias preguntas seguidas sobre el mismo tema, o ya se le invitó hace muy poco sin que reaccionara). Si el estado no es GREET, pon false."
             }
           },
-          required: ["intent", "option_id", "raw_value", "name", "confidence", "tema_pregunta"],
+          required: ["intent", "option_id", "raw_value", "name", "confidence", "tema_pregunta", "momento_para_invitar_cita"],
           additionalProperties: false
         },
         strict: true
@@ -72,7 +79,7 @@ Reglas:
 - Si el mensaje corresponde a una de esas opciones, devuelve su id exacto en option_id.
 - Nunca inventes ni calcules fechas/horas — si no está en la lista, copia lo que dijo en raw_value tal cual.
 - Un número de día mencionado junto a un nombre de día de la semana (ej. "viernes 4") manda sobre la palabra: pásalo íntegro en raw_value, el código lo resuelve.
-
+${notas ? `\nNota: ${notas}` : ""}
 Mensaje del cliente: "${mensaje}"`
       }]
     });

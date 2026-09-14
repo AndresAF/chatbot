@@ -227,6 +227,7 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
   // conversación desde cero como si nunca hubiera saludado.)
   if (!session || session.state === "CHATTING") {
     const yaSaludado = !!session;
+    const yaInvitadoAntes = !!(session && session.slots && session.slots.ultimaInvitacion);
 
     const extracted = await extraer({
       mensaje: texto,
@@ -235,6 +236,7 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
       offered: null,
       ahora: new Date(),
       timezone: TIMEZONE,
+      notas: yaInvitadoAntes ? "en el mensaje anterior el bot ya invitó a agendar una cita y el cliente no reaccionó a eso todavía." : undefined,
     });
 
     // No se exige ninguna palabra mágica ("cita") para empezar a agendar:
@@ -254,12 +256,17 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
     if (!quiereAgendar) {
       const chateando = session || sesionChateando(from);
 
-      // No se pregunta "¿quieres agendar?" en cada mensaje — solo en el
-      // primer contacto y luego cada 3 turnos de charla, para que la
-      // conversación fluya sin sentirse insistente.
+      // No se pregunta "¿quieres agendar?" en cada mensaje — la IA (el
+      // extractor) decide si es un buen momento natural según cómo va la
+      // charla, para no interrumpir a media conversación. En el primer
+      // contacto siempre se invita; si la llamada a Claude falla, se cae a
+      // un respaldo determinista (cada 3 turnos) para no dejar de invitar nunca.
       const turnoAnterior = chateando.slots.faqTurnos || 0;
       chateando.slots.faqTurnos = turnoAnterior + 1;
-      const invitarAgendar = turnoAnterior === 0 || chateando.slots.faqTurnos % 3 === 0;
+      const invitarAgendar = turnoAnterior === 0
+        ? true
+        : (extracted ? !!extracted.momento_para_invitar_cita : chateando.slots.faqTurnos % 3 === 0);
+      chateando.slots.ultimaInvitacion = invitarAgendar;
       guardar(chateando);
 
       const bienvenida = !yaSaludado ? `¡Hola${primerNombre ? ", " + primerNombre : ""}! 👋 Bienvenido a *${negocio.nombre}*. ` : "";
