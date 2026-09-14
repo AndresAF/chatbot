@@ -92,7 +92,10 @@ function construirOfertaFechas(desde, excluirCitaId = null) {
 }
 
 function construirOfertaHoras(fechaISO, excluirCitaId = null) {
-  const { slots } = db.disponibilidad(fechaISO, excluirCitaId);
+  const { slots: todosLosSlots } = db.disponibilidad(fechaISO, excluirCitaId);
+  // No se ofrece (ni se deja resolver) un horario a menos de 2h de
+  // anticipación — ver nucleo.POLICY.minLeadMinutes.
+  const slots = todosLosSlots.filter(s => nucleo.cumpleAntelacionMinima(fechaISO, s));
   const manana = slots.filter(s => parseInt(s.split(":")[0], 10) < 13);
   const tarde = slots.filter(s => parseInt(s.split(":")[0], 10) >= 13);
   const muestrear = (arr, n) => {
@@ -119,14 +122,14 @@ function mensajeHoras(fechaISO, offered) {
 }
 
 function mensajeNombre() {
-  return "¡Ya casi terminamos! ¿A nombre de quién agendamos la cita?";
+  return "¡Ya casi terminamos! ¿Me podrías compartir el nombre para la cita, por favor?";
 }
 
 function mensajeConfirmacion(slots, esCambio) {
   const encabezado = esCambio
     ? "¡Perfecto! Déjame confirmar el cambio antes de actualizar tu cita:"
     : "¡Perfecto! Déjame confirmar los detalles antes de agendar:";
-  return `${encabezado}\n📅 *${formatoLegible(slots.date, slots.time)}*\n👤 *${slots.name}*\n\n¿Todo correcto? Responde *SÍ* para confirmar.`;
+  return `${encabezado}\n📅 *${formatoLegible(slots.date, slots.time)}*\n👤 *${slots.name}*\n\n¿Todo correcto? Responde *SÍ* para confirmar, por favor.`;
 }
 
 function preguntaPendiente(state, session) {
@@ -378,6 +381,23 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
     // (telefono/citaExistente ya se calcularon arriba), este flujo la
     // reagenda (nueva fecha/hora) en vez de crear una nueva.
 
+    // Cambiar una cita que empieza en menos de 24h no se resuelve solo —
+    // ver nucleo.POLICY.cancelWindowHours — se escala a un humano en vez de
+    // dejar que el cliente la mueva automáticamente a última hora.
+    if (citaExistente && nucleo.dentroVentanaCancelacion(citaExistente.fecha, citaExistente.hora)) {
+      const s = sesionFresca(from);
+      s.state = "HANDOFF";
+      guardar(s);
+      const receptor = process.env.NUMERO_RECEPCION;
+      if (receptor) {
+        await enviarWhatsApp(
+          `whatsapp:${receptor}`,
+          `⚠️ Un cliente (${telefono}) quiere cambiar su cita del *${formatoLegible(citaExistente.fecha, citaExistente.hora)}*, que ya es en menos de 24h. Contáctalo directamente para resolverlo.`
+        );
+      }
+      return `Tu cita es en menos de 24 horas, así que ese cambio lo tiene que ver directamente alguien del equipo — ya le avisé para que te contacte por aquí mismo.`;
+    }
+
     const nueva = sesionFresca(from);
     nueva.slots.formal = formal;
     if (citaExistente) {
@@ -415,7 +435,7 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
   const quiereCancelar = extracted ? extracted.intent === "cancel" : /^(cancelar|ya no|olv[ií]dalo|d[eé]jalo)\b/i.test(texto);
   if (quiereCancelar) {
     db.eliminarSession(from);
-    return "¡Sin problema! Cancelé el proceso. Dime cuando quieras intentarlo de nuevo.";
+    return "¡Con mucho gusto! Cancelé el proceso, gracias por avisarme. Aquí estoy cuando quieras intentarlo de nuevo.";
   }
 
   // Pregunta fuera de flujo: se responde y se repite lo pendiente, sin perder el estado
@@ -452,7 +472,7 @@ function manejarHandoffSiAplica(session) {
   if (session.attempts >= 3) {
     session.state = "HANDOFF";
     guardar(session);
-    return "Creo que no nos estamos entendiendo bien por aquí 😅 Ya le avisé a alguien del equipo para que te ayude directamente.";
+    return "Disculpa, creo que no nos estamos entendiendo bien por aquí 😅 Ya le avisé a alguien del equipo para que te ayude directamente, muchas gracias por tu paciencia.";
   }
   return null;
 }
@@ -609,7 +629,7 @@ async function manejarConfirm(session, extracted, texto) {
 
   if (nucleo.esRechazo(texto)) {
     db.eliminarSession(session.phone);
-    return "¡Sin problema! Cancelé el proceso. Dime cuando quieras intentarlo de nuevo.";
+    return "¡Con mucho gusto! Cancelé el proceso, gracias por avisarme. Aquí estoy cuando quieras intentarlo de nuevo.";
   }
 
   // Cualquier otra cosa en CONFIRM se trata como corrección (§8 del spec)

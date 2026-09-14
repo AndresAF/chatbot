@@ -31,26 +31,65 @@ const PORT = process.env.PORT || 3000;
 const NUMERO_RECEPCION = process.env.NUMERO_RECEPCION || "";
 
 // ================= WEBHOOK: mensajes entrantes de WhatsApp =================
-app.post("/webhook/whatsapp", async (req, res) => {
+// Idempotencia + debounce: Twilio puede reintentar el mismo MessageSid, y un
+// cliente real casi siempre manda su idea en 2-3 mensajes seguidos en vez de
+// uno solo ("hola" / "quiero unas" / "para mañana"). Sin esto, cada uno se
+// procesaría como un turno separado y confundido. Como no podemos saber al
+// llegar el primer mensaje si vienen más en camino, el webhook SIEMPRE
+// responde vacío de inmediato, y la respuesta real se manda aparte por la
+// API de Twilio una vez que pasan 3s sin mensajes nuevos de ese número —
+// esto agrega ~3s de latencia a cada turno, es el costo inevitable de
+// juntar mensajes con certeza en vez de adivinar si ya terminó de escribir.
+const DEBOUNCE_MS = 3000;
+const turnosPendientes = {}; // { from: { textos, profileName, esRecepcion, timer } }
+
+app.post("/webhook/whatsapp", (req, res) => {
   const from = req.body.From;
   const body = (req.body.Body || "").trim();
   const profileName = req.body.ProfileName;
+  const messageSid = req.body.MessageSid;
+
+  const twiml = new twilio.twiml.MessagingResponse();
+
+  if (db.yaSeProcesoMensaje(messageSid)) {
+    return res.type("text/xml").send(twiml.toString());
+  }
+  db.marcarMensajeProcesado(messageSid);
+
   const esRecepcion = NUMERO_RECEPCION && from === `whatsapp:${NUMERO_RECEPCION}`;
+
+  const pendiente = turnosPendientes[from] || { textos: [], profileName, esRecepcion };
+  pendiente.textos.push(body);
+  pendiente.profileName = profileName || pendiente.profileName;
+  if (pendiente.timer) clearTimeout(pendiente.timer);
+  pendiente.timer = setTimeout(() => procesarTurnoJuntado(from), DEBOUNCE_MS);
+  turnosPendientes[from] = pendiente;
+
+  res.type("text/xml").send(twiml.toString());
+});
+
+async function procesarTurnoJuntado(from) {
+  const pendiente = turnosPendientes[from];
+  delete turnosPendientes[from];
+  if (!pendiente) return;
+
+  const textoJuntado = pendiente.textos.filter(Boolean).join("\n");
 
   let respuesta;
   try {
-    respuesta = esRecepcion
-      ? await manejarRecepcion(from, body)
-      : await manejarMensajePaciente(from, body, profileName);
+    respuesta = pendiente.esRecepcion
+      ? await manejarRecepcion(from, textoJuntado)
+      : await manejarMensajePaciente(from, textoJuntado, pendiente.profileName);
   } catch (err) {
     console.error("Error procesando mensaje entrante:", err);
     respuesta = "Tuvimos un problema técnico procesando tu mensaje. Por favor intenta de nuevo en un momento.";
   }
 
-  const twiml = new twilio.twiml.MessagingResponse();
-  if (respuesta) twiml.message(respuesta);
-  res.type("text/xml").send(twiml.toString());
-});
+  if (respuesta) {
+    const r = await enviarWhatsApp(from, respuesta);
+    if (!r.ok) console.error(`No se pudo entregar la respuesta a ${from} (falló el envío)`);
+  }
+}
 
 // ================= Lógica: recepción (comandos internos) =================
 const pendientes = {}; // { from: { intent, citaId, resumen, fecha?, hora? } }
@@ -181,6 +220,11 @@ cron.schedule("*/15 * * * *", async () => {
     await correrRecordatorios();
   } catch (err) {
     console.error("Error en la corrida de recordatorios automáticos:", err);
+  }
+  try {
+    db.limpiarMensajesProcesadosViejos();
+  } catch (err) {
+    console.error("Error limpiando mensajes procesados viejos:", err);
   }
 });
 

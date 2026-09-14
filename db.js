@@ -45,6 +45,14 @@ db.exec(`
     locale TEXT NOT NULL DEFAULT 'es-MX',
     timezone TEXT NOT NULL DEFAULT 'America/Mexico_City'
   );
+
+  -- Idempotencia del webhook de Twilio: si reintenta el mismo MessageSid
+  -- (por timeout, red, etc.) no se vuelve a procesar como si fuera un
+  -- mensaje nuevo.
+  CREATE TABLE IF NOT EXISTS mensajes_procesados (
+    message_sid TEXT PRIMARY KEY,
+    procesado_en TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 // Migración: agrega columnas a `sessions` si la tabla ya existía de antes sin
@@ -314,6 +322,23 @@ function eliminarSession(phone) {
   db.prepare("DELETE FROM sessions WHERE phone = ?").run(phone);
 }
 
+// ---------- Idempotencia del webhook (MessageSid de Twilio) ----------
+
+function yaSeProcesoMensaje(messageSid) {
+  if (!messageSid) return false;
+  return !!db.prepare("SELECT 1 FROM mensajes_procesados WHERE message_sid = ?").get(messageSid);
+}
+
+function marcarMensajeProcesado(messageSid) {
+  if (!messageSid) return;
+  db.prepare("INSERT OR IGNORE INTO mensajes_procesados (message_sid) VALUES (?)").run(messageSid);
+}
+
+// No necesitamos historial: solo evitar reprocesar reintentos recientes.
+function limpiarMensajesProcesadosViejos() {
+  db.prepare("DELETE FROM mensajes_procesados WHERE procesado_en < datetime('now', '-1 day')").run();
+}
+
 // Sesiones de agendado (no de charla/handoff) que llevan >= `minutos` sin
 // actividad y todavía no recibieron su recordatorio de abandono.
 function sesionesParaRecordatorioDeAgenda(minutos = 5) {
@@ -350,6 +375,7 @@ module.exports = {
   disponibilidad, horaEstaDisponible, proximosDiasConDisponibilidad,
   citasParaRecordatorio, backup,
   getSession, saveSession, eliminarSession,
+  yaSeProcesoMensaje, marcarMensajeProcesado, limpiarMensajesProcesadosViejos,
   sesionesParaRecordatorioDeAgenda, marcarRecordatorioDeAgendaEnviado,
   obtenerNegocio, actualizarNegocio,
 };

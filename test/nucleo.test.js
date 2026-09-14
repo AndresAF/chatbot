@@ -100,3 +100,17 @@ test("esConfirmacion / esRechazo reconocen las palabras del §8", () => {
   assert.equal(nucleo.esRechazo("no"), true);
   assert.equal(nucleo.esConfirmacion("no, mejor el sabado"), false);
 });
+
+// --- Política: antelación mínima para agendar (nucleo.POLICY.minLeadMinutes) ---
+test("cumpleAntelacionMinima rechaza un horario a menos de 2h y acepta uno más lejano", () => {
+  const ahora = new Date(2026, 8, 4, 10, 0); // 2026-09-04 10:00 local
+  assert.equal(nucleo.cumpleAntelacionMinima("2026-09-04", "11:00", ahora), false); // 1h
+  assert.equal(nucleo.cumpleAntelacionMinima("2026-09-04", "13:00", ahora), true);  // 3h
+});
+
+// --- Política: ventana de cancelación/cambio (nucleo.POLICY.cancelWindowHours) ---
+test("dentroVentanaCancelacion detecta una cita a menos de 24h", () => {
+  const ahora = new Date(2026, 8, 4, 10, 0);
+  assert.equal(nucleo.dentroVentanaCancelacion("2026-09-04", "20:00", ahora), true);  // 10h
+  assert.equal(nucleo.dentroVentanaCancelacion("2026-09-06", "10:00", ahora), false); // 48h
+});

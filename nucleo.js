@@ -14,6 +14,33 @@ const REQUIRED = {
   CONFIRM: ["date", "time", "name"],
 };
 
+// Reglas de negocio con antelación/ventanas de tiempo. Viven aquí (código
+// puro, sin IA ni DB) para que ninguna de ellas pueda "cumplirse" solo
+// porque el modelo dijo que ya la revisó.
+const POLICY = {
+  minLeadMinutes: 120,   // no se agenda con menos de 2h de anticipación
+  cancelWindowHours: 24, // cambiar una cita con menos de esto se resuelve con un humano
+};
+
+// fechaISO ("YYYY-MM-DD") y hora ("HH:MM") son hora local del negocio — se
+// interpretan con los mismos getters de Date que ya usa el resto del código
+// (ver db.js disponibilidad) para no introducir un criterio de huso horario
+// distinto al que ya existe.
+function minutosHastaEvento(fechaISO, hora, ahora = new Date()) {
+  const [anio, mes, dia] = fechaISO.split("-").map(Number);
+  const [h, m] = hora.split(":").map(Number);
+  const evento = new Date(anio, mes - 1, dia, h, m);
+  return (evento - ahora) / 60000;
+}
+
+function cumpleAntelacionMinima(fechaISO, hora, ahora = new Date()) {
+  return minutosHastaEvento(fechaISO, hora, ahora) >= POLICY.minLeadMinutes;
+}
+
+function dentroVentanaCancelacion(fechaISO, hora, ahora = new Date()) {
+  return minutosHastaEvento(fechaISO, hora, ahora) < POLICY.cancelWindowHours * 60;
+}
+
 function canEnter(state, slots) {
   const req = REQUIRED[state];
   if (!req) return true;
@@ -151,4 +178,5 @@ module.exports = {
   esCorreccion, esConfirmacion, esRechazo, esMensajePositivo,
   resolveFromOffered, validarFecha, validarHora, validarNombre,
   normalizar,
+  POLICY, minutosHastaEvento, cumpleAntelacionMinima, dentroVentanaCancelacion,
 };
