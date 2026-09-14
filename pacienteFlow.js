@@ -51,7 +51,12 @@ async function responderPreguntaComun(pregunta, tema, formal = false) {
   // responden con este mismo dato, y clasificarlas como "servicios" vs.
   // "otro" es ambiguo incluso para el extractor. Horario/ubicación se
   // agregan encima solo si aplican a la pregunta.
-  const partes = [`Servicios y precios: ${negocio.servicios}`];
+  // Se listan uno por línea (en vez del string tal cual, todo en una coma)
+  // para que sea trivial ubicar el precio exacto de un servicio puntual —
+  // en una lista corrida el redactor a veces "no encontraba" un precio que
+  // sí estaba ahí.
+  const listaServicios = negocio.servicios.split(",").map(s => `- ${s.trim()}`).join("\n");
+  const partes = [`Servicios y precios (cada uno ya tiene su precio definido):\n${listaServicios}`];
   if (tema === "horarios") partes.push(`Horario:\n${formatearHorarios()}`);
   if (tema === "ubicacion" && negocio.direccion) partes.push(`Dirección: ${negocio.direccion}`);
   const datosReales = partes.join("\n");
@@ -291,11 +296,24 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
     // "Faciales") NO se toma como intención de agendar — se responde con
     // información real y se vuelve a preguntar, en vez de saltar de golpe
     // al flujo de agendado y perder el hilo de la conversación.
-    const dijoQueSi = nucleo.esConfirmacion(texto) || (extracted && extracted.intent === "confirm");
-    const pidioExplicitamente = /\b(agendar|agenda|cita|reservar|reservaci[oó]n|apartar)\b/i.test(texto);
-    const quiereAgendar = dijoQueSi || pidioExplicitamente;
+    //
+    // Un mensaje como "Ok y cómo estás?" empieza con una palabra de
+    // confirmación pero en realidad no lo es — por eso, cuando el extractor
+    // sí respondió, se le da más peso a su clasificación de intención que a
+    // la palabra suelta: solo cuenta como "dijo que sí" si el extractor
+    // coincide en que es una confirmación real, y el regex de palabras
+    // clave ("agendar", "cita"...) no cuenta si el extractor cree que en
+    // realidad está preguntando algo o cancelando. El regex se usa solo tal
+    // cual cuando la llamada a Claude falló (para no dejar al cliente sin
+    // poder agendar si la API está caída).
+    const pareceQuererAgendar = /\b(agendar|agenda|cita|reservar|reservaci[oó]n|apartar)\b/i.test(texto);
+    const quiereAgendar = extracted
+      ? extracted.intent === "confirm" || (pareceQuererAgendar && !["cancel", "ask_question"].includes(extracted.intent))
+      : nucleo.esConfirmacion(texto) || pareceQuererAgendar;
 
     const negocio = db.obtenerNegocio();
+    const telefono = from.replace("whatsapp:", "");
+    const citaExistente = db.buscarCitaActivaPorTelefono(telefono);
 
     if (!quiereAgendar) {
       const chateando = session || sesionChateando(from);
@@ -314,7 +332,10 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
       chateando.slots.ultimaInvitacion = invitarAgendar;
       guardar(chateando);
 
-      const bienvenida = !yaSaludado ? `¡Hola${primerNombre ? ", " + primerNombre : ""}! 👋 Bienvenido a *${negocio.nombre}*. ` : "";
+      const recordatorioCita = citaExistente
+        ? ` Por cierto, ya tienes tu cita para el *${formatoLegible(citaExistente.fecha, citaExistente.hora)}* — si tienes alguna duda sobre ella, dime.`
+        : "";
+      const bienvenida = !yaSaludado ? `¡Hola${primerNombre ? ", " + primerNombre : ""}! 👋 Bienvenido a *${negocio.nombre}*.${recordatorioCita} ` : "";
 
       const dijoQueNo = nucleo.esRechazo(texto) || (extracted && extracted.intent === "cancel");
       if (dijoQueNo) {
@@ -335,10 +356,9 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
       return `${bienvenida}${respuesta}${invitacion}`;
     }
 
-    // Un mismo número no puede tener dos citas activas — si ya tiene una,
-    // este flujo la reagenda (nueva fecha/hora) en vez de crear una nueva.
-    const telefono = from.replace("whatsapp:", "");
-    const citaExistente = db.buscarCitaActivaPorTelefono(telefono);
+    // Un mismo número no puede tener dos citas activas — si ya tiene una
+    // (telefono/citaExistente ya se calcularon arriba), este flujo la
+    // reagenda (nueva fecha/hora) en vez de crear una nueva.
 
     const nueva = sesionFresca(from);
     nueva.slots.formal = formal;
@@ -530,7 +550,21 @@ function manejarAskName(session, extracted, texto) {
   return "¿Me compartes tu nombre completo, por favor?";
 }
 
-function manejarConfirm(session, extracted, texto) {
+async function manejarConfirm(session, extracted, texto) {
+  // Mismo cuidado que en el saludo: "Ok, oigan y tienen estacionamiento?"
+  // empieza con una palabra de confirmación pero no es un sí real. Este es
+  // el candado final antes de escribir en la base de datos, así que ante la
+  // duda (el extractor cree que en realidad está preguntando algo) NO se
+  // confirma ni se cancela solo por la palabra suelta — se contesta la
+  // pregunta primero y se le vuelve a mostrar el resumen para confirmar.
+  const pareceOtraCosa = extracted && extracted.intent === "ask_question";
+
+  if (pareceOtraCosa) {
+    const respuesta = await responderPreguntaComun(texto, extracted.tema_pregunta, session.slots.formal);
+    guardar(session);
+    return `${respuesta}\n\n${mensajeConfirmacion(session.slots, !!session.citaId)}`;
+  }
+
   if (nucleo.esConfirmacion(texto)) {
     // Re-chequeo real de disponibilidad justo antes de escribir (pudo ocuparse mientras tanto)
     if (!db.horaEstaDisponible(session.slots.date, session.slots.time, session.citaId)) {

@@ -34,7 +34,7 @@ async function redactarRespuesta({ pregunta, datosReales, nombreNegocio, formal 
 ${VOZ_BASE}
 ${tratoSegunFormalidad(formal)}
 
-Además, sé CONCISO — como escribiría una persona real por WhatsApp, no un párrafo de marketing. Máximo 1-2 líneas cortas. Sin relleno ("con gusto te comento que...", "para tu información..."), sin repetir la pregunta del cliente, ve directo al dato. Sin emojis salvo alguno muy natural y solo si de verdad aporta.
+Además, sé breve — 1-3 líneas, no un párrafo de marketing. Pero breve NO es lo mismo que seco: un mensaje de una frase pelona ("Ofrecemos manicure.") se siente cortante y frío, no profesional. Escribe como alguien que de verdad quiere ayudar: reconoce lo que preguntó en unas palabras y contesta con calidez ("Claro, el manicure...", "Con gusto — el corte..."). Sin relleno de más ("para tu información...", repetir la pregunta completa), pero sí con el calorcito de una persona real. Sin emojis salvo alguno muy natural y solo si de verdad aporta.
 
 Un cliente preguntó: "${pregunta}"
 
@@ -42,9 +42,10 @@ Datos reales disponibles para responder (no existe más información que esta):
 ${datosReales || "(no hay un dato específico para esta pregunta)"}
 
 Instrucciones:
+- Antes de decir que no tienes un dato, REVISA la lista con cuidado — casi siempre el dato que preguntan (precio de un servicio puntual, por ejemplo) SÍ está ahí, solo hay que ubicarlo en la lista.
 - Si los datos de arriba responden la pregunta (aunque sea aproximado, ej. un precio "desde $X"), contesta con ellos de forma natural y CON CONFIANZA — no lo diluyas ni lo remitas a "que alguien te lo confirme" si el dato ya está ahí arriba. Esto es una demo de venta: entre más autosuficiente se vea el asistente, mejor. NUNCA inventes ni agregues nada que no esté en los datos (una promoción, un precio exacto no listado, nombres de personal, marcas, etc.) — si el dato es "desde $X", dilo tal cual como aproximado, no como precio fijo. No listes TODOS los datos si el cliente preguntó por algo específico — responde solo lo que preguntó.
 - Usa negritas de WhatsApp (*así*, con asteriscos) en los datos clave — nombres de servicios, horarios, precios si los hay.
-- Solo si los datos arriba genuinamente NO cubren lo que preguntó, dilo con calidez y sin sonar robótico — algo como que no tienes ese dato a la mano ahorita pero con gusto lo puede confirmar alguien del equipo. No uses esta salida si el dato SÍ está disponible arriba.
+- Solo si los datos arriba genuinamente NO cubren lo que preguntó (revisaste bien y de plano no está), dilo con calidez y sin sonar robótico — algo como que no tienes ese dato a la mano ahorita pero con gusto lo puede confirmar alguien del equipo. No uses esta salida si el dato SÍ está disponible arriba.
 - NUNCA preguntes ni menciones si quiere agendar una cita — eso se agrega aparte, automáticamente, después de tu mensaje. Si tú también lo mencionas, la pregunta queda duplicada y se ve mal. Enfócate solo en contestar lo que preguntó, nada más.
 - Escribe SOLO el mensaje de respuesta, nada más (sin comillas, sin explicar lo que hiciste).`
       }]
