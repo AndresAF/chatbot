@@ -5,7 +5,7 @@
 
 const db = require("./db");
 const { formatoLegible, toISO } = require("./dateutils");
-const { esMensajeInapropiado, pideHumano } = require("./iaChat");
+const { esMensajeInapropiado, pideHumano, esTemaMedico, esQueja } = require("./iaChat");
 const { extraer } = require("./extractor");
 const { redactarRespuesta, explicarComoResponder } = require("./redactor");
 const { enviarWhatsApp } = require("./whatsapp");
@@ -43,7 +43,7 @@ function formatearHorarios() {
 // Le da calidez a la respuesta usando Claude, pero solo con datos reales que
 // ya tenemos (nunca inventa precios, promociones, etc. que no existen). Si
 // la llamada a Claude falla, cae a una plantilla fija con el mismo dato real.
-async function responderPreguntaComun(pregunta, tema) {
+async function responderPreguntaComun(pregunta, tema, formal = false) {
   const negocio = db.obtenerNegocio();
 
   // Los servicios/precios se incluyen SIEMPRE como contexto disponible —
@@ -56,7 +56,7 @@ async function responderPreguntaComun(pregunta, tema) {
   if (tema === "ubicacion" && negocio.direccion) partes.push(`Dirección: ${negocio.direccion}`);
   const datosReales = partes.join("\n");
 
-  const redactada = await redactarRespuesta({ pregunta, datosReales, nombreNegocio: negocio.nombre });
+  const redactada = await redactarRespuesta({ pregunta, datosReales, nombreNegocio: negocio.nombre, formal });
   if (redactada) return redactada;
 
   if (tema === "horarios") return `¡Con gusto! *Nuestro horario:*\n${formatearHorarios()}`;
@@ -205,8 +205,43 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
   const texto = (textoOriginal || "").trim();
   const primerNombre = primerNombreDePerfil(profileName);
 
+  let session = cargarSesion(from);
+
+  // Si en algún momento la persona habla de "usted", el bot se cambia a
+  // usted y ya no regresa a tú en lo que resta de la conversación — se
+  // guarda en slots.formal (mismo truco que faqTurnos: reusa el JSON de la
+  // sesión, sin columna nueva) y se le pasa a las partes redactadas por IA.
+  const formal = !!(session && session.slots && session.slots.formal) || /\busted\b/i.test(texto);
+  if (session) session.slots.formal = formal;
+
   if (esMensajeInapropiado(texto)) {
     return "Por favor mantengamos la conversación enfocada en agendar tu cita. Dime cuando quieras continuar.";
+  }
+
+  // Temas de salud (embarazo, alergias, medicamentos, contraindicaciones,
+  // reacciones en la piel): el bot nunca opina ni da tranquilidad médica —
+  // eso es responsabilidad de la especialista. No es un handoff silencioso
+  // como pideHumano: solo se redirige esta pregunta puntual y la
+  // conversación sigue donde iba (si estaba a media agenda, sigue ahí).
+  if (esTemaMedico(texto)) {
+    return "Eso mejor que lo valore la especialista directamente, para cuidarte bien — por aquí no te puedo asesorar en ese tema. ¿Quieres que te agende una valoración, o prefieres que alguien del equipo te llame?";
+  }
+
+  // Queja o inconformidad: una disculpa breve (sin sobre-disculparse),
+  // se pregunta qué pasó, y se escala a un humano — igual que pideHumano.
+  if (esQueja(texto)) {
+    const s = session || sesionFresca(from);
+    s.slots.formal = formal;
+    s.state = "HANDOFF";
+    guardar(s);
+    const receptor = process.env.NUMERO_RECEPCION;
+    if (receptor) {
+      await enviarWhatsApp(
+        `whatsapp:${receptor}`,
+        `⚠️ Un cliente (${from.replace("whatsapp:", "")}) parece tener una queja o inconformidad. Entra a la conversación para atenderlo directamente.`
+      );
+    }
+    return "Lamento el inconveniente. ¿Me cuentas brevemente qué pasó? Ya le aviso a alguien del equipo para que te ayude directamente.";
   }
 
   // Pide hablar con una persona: el bot se calla de inmediato (sin esperar
@@ -215,7 +250,8 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
   // Business Suite — el bot deja de responder en este chat en cuanto entra
   // a HANDOFF, así que la persona puede tomar el control sin que se crucen.
   if (pideHumano(texto)) {
-    const s = cargarSesion(from) || sesionFresca(from);
+    const s = session || sesionFresca(from);
+    s.slots.formal = formal;
     s.state = "HANDOFF";
     guardar(s);
     const receptor = process.env.NUMERO_RECEPCION;
@@ -227,8 +263,6 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
     }
     return "¡Claro que sí! En un momento alguien de nuestro equipo te atiende directamente por aquí mismo.";
   }
-
-  let session = cargarSesion(from);
 
   // --- Sin sesión, o ya se saludó pero aún no empieza a agendar ---
   // (CHATTING existe solo para no repetir "¡Hola! Bienvenido a X" cada vez
@@ -265,6 +299,7 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
 
     if (!quiereAgendar) {
       const chateando = session || sesionChateando(from);
+      chateando.slots.formal = formal;
 
       // No se pregunta "¿quieres agendar?" en cada mensaje — la IA (el
       // extractor) decide si es un buen momento natural según cómo va la
@@ -291,8 +326,12 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
         return `${bienvenida}¿En qué te puedo ayudar?${invitacion}`;
       }
 
-      const respuesta = await responderPreguntaComun(texto, (extracted && extracted.tema_pregunta) || "otro");
-      const invitacion = invitarAgendar ? "\n\n¿Te gustaría agendar una cita?" : "";
+      const respuesta = await responderPreguntaComun(texto, (extracted && extracted.tema_pregunta) || "otro", formal);
+      // Defensa extra: aunque se le pide al redactor que nunca mencione la
+      // cita (eso se agrega aparte), a veces lo hace de todos modos — si su
+      // respuesta ya toca el tema, no se duplica la pregunta.
+      const yaMencionaCita = /\bcitas?\b/i.test(respuesta);
+      const invitacion = invitarAgendar && !yaMencionaCita ? "\n\n¿Te gustaría agendar una cita?" : "";
       return `${bienvenida}${respuesta}${invitacion}`;
     }
 
@@ -302,6 +341,7 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
     const citaExistente = db.buscarCitaActivaPorTelefono(telefono);
 
     const nueva = sesionFresca(from);
+    nueva.slots.formal = formal;
     if (citaExistente) {
       nueva.citaId = citaExistente.id;
       nueva.slots.name = citaExistente.paciente;
@@ -343,7 +383,7 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
   // Pregunta fuera de flujo: se responde y se repite lo pendiente, sin perder el estado
   if (extracted && extracted.intent === "ask_question" && session.state !== "CONFIRM") {
     guardar(session);
-    const respuesta = await responderPreguntaComun(texto, extracted.tema_pregunta);
+    const respuesta = await responderPreguntaComun(texto, extracted.tema_pregunta, session.slots.formal);
     return `${respuesta}\n\n${preguntaPendiente(session.state, session)}`;
   }
 
@@ -416,7 +456,7 @@ async function manejarAskDate(session, extracted, texto) {
   const opciones = session.offered.options.map(o => `${o.id}) ${o.label}`).join("\n");
   const explicacion = await explicarComoResponder({
     textoUsuario: texto, loQueSeEspera: "qué día quiere para su cita",
-    opciones, nombreNegocio: negocio.nombre,
+    opciones, nombreNegocio: negocio.nombre, formal: session.slots.formal,
   });
   return explicacion
     ? `${explicacion}\n\n${mensajeFechas(session.offered)}`
@@ -463,7 +503,7 @@ async function manejarAskTime(session, extracted, texto) {
   const opciones = session.offered.options.map(o => `${o.id}) ${o.value}`).join("\n");
   const explicacion = await explicarComoResponder({
     textoUsuario: texto, loQueSeEspera: "qué hora quiere para su cita",
-    opciones, nombreNegocio: negocio.nombre,
+    opciones, nombreNegocio: negocio.nombre, formal: session.slots.formal,
   });
   return explicacion
     ? `${explicacion}\n\n${mensajeHoras(session.slots.date, session.offered)}`
@@ -580,7 +620,7 @@ async function manejarCorreccion(session, extracted, texto) {
     : "(ninguna lista activa — se espera confirmación con sí/no, o corregir la fecha/hora)";
   const explicacion = await explicarComoResponder({
     textoUsuario: texto, loQueSeEspera: SLOT_PEDIDO[session.state] || "la información pendiente",
-    opciones, nombreNegocio: negocio.nombre,
+    opciones, nombreNegocio: negocio.nombre, formal: session.slots.formal,
   });
   return explicacion
     ? `${explicacion}\n\n${preguntaPendiente(session.state, session)}`

@@ -29,4 +29,36 @@ function pideHumano(texto) {
   return PATRONES_PIDE_HUMANO.some(p => p.test(texto));
 }
 
-module.exports = { esMensajeInapropiado, pideHumano };
+// Temas de salud/contraindicaciones (embarazo, alergias, medicamentos,
+// reacciones en la piel, etc.): el bot NUNCA debe opinar ni dar tranquilidad
+// médica falsa — eso es responsabilidad legal real para un negocio de
+// estética. Determinista a propósito: no queremos depender de que el
+// redactor "se acuerde" de no opinar en cada llamada.
+const PATRONES_TEMA_MEDICO = [
+  /\b(embarazo|embarazada|lactancia|lactando|amamant\w*)\b/i,
+  /\b(medicament[oa]s?|f[aá]rmaco|tratamiento m[eé]dico|is[oó]tretinoina|retinol|ácido retinoico)\b/i,
+  /\b(alergi[ac]?[oa]?s?|al[eé]rgic[oa]s?|contraindicaci[oó]n(es)?)\b/i,
+  /\b(reacci[oó]n (en la piel|al[eé]rgica)|se me irrit[oó]|me sali[oó] (una |un )?(roncha|ampolla|salp[uú]llido)|efectos secundarios)\b/i,
+  /es seguro (hacerme|usar|aplicarme) esto/i,
+];
+
+function esTemaMedico(texto) {
+  return PATRONES_TEMA_MEDICO.some(p => p.test(texto));
+}
+
+// Queja o inconformidad explícita del cliente: se responde con una disculpa
+// breve (sin sobre-disculparse) y se escala a un humano — no es tarea del
+// bot resolver ni defenderse. Determinista, mismo criterio que arriba.
+const PATRONES_QUEJA = [
+  /\b(queja|inconforme|p[eé]simo|terrible|decepcionad[oa]|mal atendid[oa]|mal servicio)\b/i,
+  /me cobraron de m[aá]s/i,
+  /cancelaron sin avisar/i,
+  /no me gust[oó] (nada|para nada)/i,
+  /(esto|eso) (est[aá] mal|es una falta de respeto)/i,
+];
+
+function esQueja(texto) {
+  return PATRONES_QUEJA.some(p => p.test(texto));
+}
+
+module.exports = { esMensajeInapropiado, pideHumano, esTemaMedico, esQueja };
