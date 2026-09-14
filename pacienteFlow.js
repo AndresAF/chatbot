@@ -40,25 +40,38 @@ function formatearHorarios() {
   return abiertos.map(c => `${DIAS_LARGOS[c.dia_semana]}: ${c.hora_inicio} a ${c.hora_fin}`).join("\n");
 }
 
+// Único lugar que sabe si este cliente ya tiene una cita — se usa para que
+// cualquier respuesta redactada por IA (FAQ, aclaraciones) pueda contestar
+// con la verdad si preguntan "¿ya tenía una cita?" en vez de inventar una
+// respuesta, ya que ni responderPreguntaComun ni explicarComoResponder
+// tienen ese dato por su cuenta.
+function infoCitaExistente(telefono) {
+  const cita = telefono ? db.buscarCitaActivaPorTelefono(telefono) : null;
+  return cita
+    ? `este cliente SÍ tiene una cita activa: ${formatoLegible(cita.fecha, cita.hora)}.`
+    : "este cliente NO tiene ninguna cita activa agendada actualmente.";
+}
+
 // Le da calidez a la respuesta usando Claude, pero solo con datos reales que
 // ya tenemos (nunca inventa precios, promociones, etc. que no existen). Si
 // la llamada a Claude falla, cae a una plantilla fija con el mismo dato real.
-async function responderPreguntaComun(pregunta, tema, formal = false) {
+async function responderPreguntaComun(pregunta, tema, formal = false, telefono = null) {
   const negocio = db.obtenerNegocio();
 
   // Los servicios/precios se incluyen SIEMPRE como contexto disponible —
   // muchas preguntas de "otro" (ej. "cuánto cuesta X") en realidad se
   // responden con este mismo dato, y clasificarlas como "servicios" vs.
-  // "otro" es ambiguo incluso para el extractor. Horario/ubicación se
-  // agregan encima solo si aplican a la pregunta.
-  // Se listan uno por línea (en vez del string tal cual, todo en una coma)
-  // para que sea trivial ubicar el precio exacto de un servicio puntual —
-  // en una lista corrida el redactor a veces "no encontraba" un precio que
-  // sí estaba ahí.
+  // "otro" es ambiguo incluso para el extractor. Horario/ubicación/cita
+  // existente se agregan encima solo si aplican a la pregunta.
+  // Los servicios se listan uno por línea (en vez del string tal cual, todo
+  // en una coma) para que sea trivial ubicar el precio exacto de un
+  // servicio puntual — en una lista corrida el redactor a veces "no
+  // encontraba" un precio que sí estaba ahí.
   const listaServicios = negocio.servicios.split(",").map(s => `- ${s.trim()}`).join("\n");
   const partes = [`Servicios y precios (cada uno ya tiene su precio definido):\n${listaServicios}`];
   if (tema === "horarios") partes.push(`Horario:\n${formatearHorarios()}`);
   if (tema === "ubicacion" && negocio.direccion) partes.push(`Dirección: ${negocio.direccion}`);
+  partes.push(`Cita del cliente: ${infoCitaExistente(telefono)}`);
   const datosReales = partes.join("\n");
 
   const redactada = await redactarRespuesta({ pregunta, datosReales, nombreNegocio: negocio.nombre, formal });
@@ -347,7 +360,7 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
         return `${bienvenida}¿En qué te puedo ayudar?${invitacion}`;
       }
 
-      const respuesta = await responderPreguntaComun(texto, (extracted && extracted.tema_pregunta) || "otro", formal);
+      const respuesta = await responderPreguntaComun(texto, (extracted && extracted.tema_pregunta) || "otro", formal, telefono);
       // Defensa extra: aunque se le pide al redactor que nunca mencione la
       // cita (eso se agrega aparte), a veces lo hace de todos modos — si su
       // respuesta ya toca el tema, no se duplica la pregunta.
@@ -403,7 +416,7 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
   // Pregunta fuera de flujo: se responde y se repite lo pendiente, sin perder el estado
   if (extracted && extracted.intent === "ask_question" && session.state !== "CONFIRM") {
     guardar(session);
-    const respuesta = await responderPreguntaComun(texto, extracted.tema_pregunta, session.slots.formal);
+    const respuesta = await responderPreguntaComun(texto, extracted.tema_pregunta, session.slots.formal, session.phone.replace("whatsapp:", ""));
     return `${respuesta}\n\n${preguntaPendiente(session.state, session)}`;
   }
 
@@ -477,6 +490,7 @@ async function manejarAskDate(session, extracted, texto) {
   const explicacion = await explicarComoResponder({
     textoUsuario: texto, loQueSeEspera: "qué día quiere para su cita",
     opciones, nombreNegocio: negocio.nombre, formal: session.slots.formal,
+    citaInfo: infoCitaExistente(session.phone.replace("whatsapp:", "")),
   });
   return explicacion
     ? `${explicacion}\n\n${mensajeFechas(session.offered)}`
@@ -524,6 +538,7 @@ async function manejarAskTime(session, extracted, texto) {
   const explicacion = await explicarComoResponder({
     textoUsuario: texto, loQueSeEspera: "qué hora quiere para su cita",
     opciones, nombreNegocio: negocio.nombre, formal: session.slots.formal,
+    citaInfo: infoCitaExistente(session.phone.replace("whatsapp:", "")),
   });
   return explicacion
     ? `${explicacion}\n\n${mensajeHoras(session.slots.date, session.offered)}`
@@ -560,7 +575,7 @@ async function manejarConfirm(session, extracted, texto) {
   const pareceOtraCosa = extracted && extracted.intent === "ask_question";
 
   if (pareceOtraCosa) {
-    const respuesta = await responderPreguntaComun(texto, extracted.tema_pregunta, session.slots.formal);
+    const respuesta = await responderPreguntaComun(texto, extracted.tema_pregunta, session.slots.formal, session.phone.replace("whatsapp:", ""));
     guardar(session);
     return `${respuesta}\n\n${mensajeConfirmacion(session.slots, !!session.citaId)}`;
   }
@@ -655,6 +670,7 @@ async function manejarCorreccion(session, extracted, texto) {
   const explicacion = await explicarComoResponder({
     textoUsuario: texto, loQueSeEspera: SLOT_PEDIDO[session.state] || "la información pendiente",
     opciones, nombreNegocio: negocio.nombre, formal: session.slots.formal,
+    citaInfo: infoCitaExistente(session.phone.replace("whatsapp:", "")),
   });
   return explicacion
     ? `${explicacion}\n\n${preguntaPendiente(session.state, session)}`

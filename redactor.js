@@ -63,7 +63,7 @@ Instrucciones:
 // un mensaje genérico de "no entendí" se le pide a Claude que interprete el
 // texto libre y explique con calidez cómo responder — usando SOLO las
 // opciones reales que se le pasan (nunca inventa disponibilidad nueva).
-async function explicarComoResponder({ textoUsuario, loQueSeEspera, opciones, nombreNegocio, formal = false }) {
+async function explicarComoResponder({ textoUsuario, loQueSeEspera, opciones, nombreNegocio, formal = false, citaInfo }) {
   try {
     const respuesta = await anthropic.messages.create({
       model: "claude-haiku-4-5",
@@ -77,8 +77,8 @@ ${tratoSegunFormalidad(formal)}
 
 Opciones válidas ahora mismo (son las únicas reales, no inventes otras ni disponibilidad nueva):
 ${opciones}
-
-Escribe un mensaje MUY breve (1-2 líneas cortas, sin relleno) que le explique amablemente que no le entendiste bien y cómo puede responder correctamente — usando SOLO esas opciones (ej. el número de la opción, o el día/hora tal cual aparece arriba). No repitas la lista completa de opciones (eso se muestra aparte). No expliques lo que hiciste, escribe solo el mensaje.`
+${citaInfo ? `\nDato real sobre este cliente (úsalo si su mensaje en realidad pregunta o comenta sobre una cita que ya tenía, en vez de tratarlo como que no supiste identificar ${loQueSeEspera}): ${citaInfo}\n` : ""}
+Escribe un mensaje MUY breve (1-2 líneas cortas, sin relleno) que le explique amablemente que no le entendiste bien y cómo puede responder correctamente — usando SOLO esas opciones (ej. el número de la opción, o el día/hora tal cual aparece arriba). No repitas la lista completa de opciones (eso se muestra aparte). No inventes datos que no estén arriba. No expliques lo que hiciste, escribe solo el mensaje.`
       }]
     });
     const bloque = respuesta.content.find(b => b.type === "text");
