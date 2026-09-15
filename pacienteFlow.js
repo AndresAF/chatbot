@@ -14,11 +14,14 @@ const nucleo = require("./nucleo");
 // Cuánto silencio hace que una sesión se considere abandonada y se reinicie
 // desde cero. Un agendado a medias (o una charla vieja) no debe seguir
 // "atrapando" la conversación días después si la persona ya se olvidó y
-// solo vuelve a saludar. HANDOFF es la excepción: ahí un humano ya tomó el
-// control, así que se le da mucho más margen para no hacer que el bot
-// vuelva a responder solo y se cruce con esa persona.
+// solo vuelve a saludar. HANDOFF es distinto pero NO indefinido: el dueño
+// le contesta al cliente desde su propio número personal, no por este
+// sistema, así que el bot no está "esperando" nada real — es solo un
+// margen para no interrumpir mientras el dueño alcanza a escribirle. Si
+// pasan 3h y el cliente vuelve a escribir por algo nuevo, mejor que el bot
+// vuelva a ayudar en vez de dejarlo sin ninguna respuesta casi un día entero.
 const SESION_EXPIRA_MS = {
-  HANDOFF: 24 * 60 * 60 * 1000, // 24h
+  HANDOFF: 3 * 60 * 60 * 1000,  // 3h
   DEFAULT: 2 * 60 * 60 * 1000,  // 2h — agendado abandonado o charla vieja
 };
 const TIMEZONE = "America/Mexico_City";
@@ -181,6 +184,17 @@ function cargarSesion(phone) {
   const limite = SESION_EXPIRA_MS[s.state] || SESION_EXPIRA_MS.DEFAULT;
   const ultima = s.last_message_at ? new Date(s.last_message_at).getTime() : 0;
   if (Date.now() - ultima > limite) {
+    // HANDOFF es la única excepción a "se borra y arranca de cero": en vez
+    // de olvidar que este cliente fue escalado, se pasa a un estado de
+    // seguimiento — así, cuando vuelva a escribir, el bot pregunta si ya
+    // se resolvió en vez de fingir que nunca pasó nada (y puede volver a
+    // avisarle al dueño si nunca se comunicó).
+    if (s.state === "HANDOFF") {
+      s.state = "HANDOFF_CHECKIN";
+      s.last_message_at = new Date().toISOString(); // arranca de cero el reloj de este nuevo estado
+      db.saveSession(s);
+      return s;
+    }
     db.eliminarSession(phone);
     return null;
   }
@@ -439,7 +453,43 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
 
   // --- Con sesión activa ---
   if (session.state === "HANDOFF") {
-    return null; // el bot ya avisó y calla; un humano sigue desde aquí
+    // El bot se queda callado (un humano sigue desde aquí, por su propio
+    // número), pero si el cliente insiste antes de que pase la ventana de
+    // espera, merece UNA respuesta de que no se le está ignorando — no
+    // silencio total, pero tampoco repetir el mismo aviso cada vez que
+    // escriba de nuevo. Esto es un template fijo a propósito (no IA): es
+    // siempre el mismo mensaje, no hace falta gastar una llamada a Claude.
+    if (!session.slots.avisoEsperaEnviado) {
+      session.slots.avisoEsperaEnviado = true;
+      // OJO: se guarda con db.saveSession directo, NO con guardar() — no
+      // se debe correr el reloj de la ventana de espera solo porque el
+      // cliente insistió; el conteo sigue desde que se escaló, no desde
+      // el último mensaje.
+      db.saveSession(session);
+      return "Por favor espera un momento — el dueño se va a comunicar contigo directamente por WhatsApp. Si no te contacta en las próximas horas, escríbeme de nuevo, por favor.";
+    }
+    return null;
+  }
+
+  // Pasó la ventana de espera del HANDOFF y el cliente volvió a escribir:
+  // en vez de fingir que nunca pasó nada, se le pregunta si ya se resolvió
+  // — si no, se le vuelve a avisar al dueño (puede que nunca se haya
+  // comunicado). Determinista a propósito, igual que el aviso de arriba.
+  if (session.state === "HANDOFF_CHECKIN") {
+    if (!session.slots.preguntoSiResuelto) {
+      session.slots.preguntoSiResuelto = true;
+      guardar(session);
+      return "¡Hola de nuevo! ¿Ya pudiste resolver lo que necesitabas con el equipo, o seguimos esperando?";
+    }
+    db.eliminarSession(from);
+    if (nucleo.esConfirmacion(texto)) {
+      return "¡Qué bueno! Cualquier otra cosa que necesites, aquí ando.";
+    }
+    await avisarEscalacion(
+      from.replace("whatsapp:", ""),
+      "Un cliente que había escalado hace unas horas sigue sin resolver su tema (o nadie se comunicó con él todavía). Por favor contáctalo."
+    );
+    return "Disculpa la demora — ya le insistí de nuevo a alguien del equipo para que te contacte lo antes posible.";
   }
 
   const extracted = await extraer({
