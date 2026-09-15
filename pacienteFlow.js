@@ -360,7 +360,18 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
 
       const dijoQueNo = nucleo.esRechazo(texto) || (extracted && extracted.intent === "cancel");
       if (dijoQueNo) {
-        return `${bienvenida}¡Sin problema! Aquí estoy cuando quieras.`;
+        // Variantes para no repetir la misma frase tal cual si dice "no"
+        // varias veces seguidas (se sentía como un bot atorado en loop).
+        const vecesAnterior = chateando.slots.vecesDijoNo || 0;
+        chateando.slots.vecesDijoNo = vecesAnterior + 1;
+        guardar(chateando);
+        const variantesNo = [
+          "¡Sin problema! Aquí estoy cuando quieras.",
+          "Va, sin compromiso — aquí ando si se te ofrece algo.",
+          "Entendido, quedo por aquí para cuando gustes.",
+        ];
+        const variante = variantesNo[Math.min(vecesAnterior, variantesNo.length - 1)];
+        return `${bienvenida}${variante}`;
       }
 
       if (extracted && extracted.intent === "greet") {
@@ -574,6 +585,14 @@ async function manejarAskTime(session, extracted, texto) {
     : `No logré identificar bien la hora 🤔 ${mensajeHoras(session.slots.date, session.offered)}`;
 }
 
+// Variantes para no repetir la misma frase tal cual si falla dos veces
+// seguidas (con una sola frase fija, un segundo intento fallido se sentía
+// como un bot descompuesto repitiendo lo mismo sin haber "escuchado").
+const REINTENTOS_NOMBRE = [
+  "¿Me compartes tu nombre completo, por favor?",
+  "Disculpa, creo que no me llegó bien — ¿me compartes tu nombre completo una vez más, por favor?",
+];
+
 function manejarAskName(session, extracted, texto) {
   const nombreCrudo = (extracted && extracted.name) || texto;
   const { verdict, value } = nucleo.validarNombre(nombreCrudo);
@@ -591,7 +610,8 @@ function manejarAskName(session, extracted, texto) {
   if (handoff) return handoff;
 
   guardar(session);
-  return "¿Me compartes tu nombre completo, por favor?";
+  const variante = REINTENTOS_NOMBRE[Math.min(session.attempts - 1, REINTENTOS_NOMBRE.length - 1)];
+  return variante;
 }
 
 async function manejarConfirm(session, extracted, texto) {
