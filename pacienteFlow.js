@@ -364,8 +364,12 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
       }
 
       if (extracted && extracted.intent === "greet") {
+        // Si ya se había saludado antes, un simple "¿En qué te puedo
+        // ayudar?" a secas se siente cortante — se re-saluda con calidez
+        // en vez de ir directo a la pregunta.
+        const pregunta = yaSaludado ? "¡Hola de nuevo! 😊 ¿En qué más te puedo ayudar?" : "¿En qué te puedo ayudar?";
         const invitacion = invitarAgendar ? ` ${invitacionTexto}` : "";
-        return `${bienvenida}¿En qué te puedo ayudar?${invitacion}`;
+        return `${bienvenida}${pregunta}${invitacion}`;
       }
 
       const respuesta = await responderPreguntaComun(texto, (extracted && extracted.tema_pregunta) || "otro", formal, telefono);
