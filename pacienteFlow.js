@@ -32,6 +32,19 @@ const SLOT_PEDIDO = {
 
 const DIAS_LARGOS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 
+// ---------- Aviso al dueño/recepción cuando se necesita escalar ----------
+
+// `telefono` sin el prefijo "whatsapp:". Siempre incluye el número Y un link
+// de wa.me, para que el dueño pueda tocarlo y escribirle directo al cliente
+// por WhatsApp sin tener que copiar el número a mano.
+async function avisarEscalacion(telefono, motivo) {
+  const receptor = process.env.NUMERO_RECEPCION;
+  if (!receptor) return;
+  const soloDigitos = telefono.replace(/[^\d]/g, "");
+  const mensaje = `⚠️ ${motivo}\n📱 Cliente: *${telefono}*\nEscríbele directo: https://wa.me/${soloDigitos}`;
+  await enviarWhatsApp(`whatsapp:${receptor}`, mensaje);
+}
+
 // ---------- Info del negocio / preguntas frecuentes ----------
 
 function formatearHorarios() {
@@ -245,6 +258,13 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
   // como pideHumano: solo se redirige esta pregunta puntual y la
   // conversación sigue donde iba (si estaba a media agenda, sigue ahí).
   if (esTemaMedico(texto)) {
+    // No es un handoff que calle al bot (la conversación sigue), pero el
+    // dueño sí debe enterarse — es justo el tipo de tema que puede requerir
+    // seguimiento humano aunque el cliente no lo pida explícitamente.
+    await avisarEscalacion(
+      from.replace("whatsapp:", ""),
+      "Un cliente preguntó algo relacionado a salud/contraindicaciones y el bot lo redirigió sin opinar. Puede valer la pena que le hables."
+    );
     return "Eso mejor que lo valore la especialista directamente, para cuidarte bien — por aquí no te puedo asesorar en ese tema. ¿Quieres que te agende una valoración, o prefieres que alguien del equipo te llame?";
   }
 
@@ -255,13 +275,7 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
     s.slots.formal = formal;
     s.state = "HANDOFF";
     guardar(s);
-    const receptor = process.env.NUMERO_RECEPCION;
-    if (receptor) {
-      await enviarWhatsApp(
-        `whatsapp:${receptor}`,
-        `⚠️ Un cliente (${from.replace("whatsapp:", "")}) parece tener una queja o inconformidad. Entra a la conversación para atenderlo directamente.`
-      );
-    }
+    await avisarEscalacion(from.replace("whatsapp:", ""), "Un cliente parece tener una queja o inconformidad. Entra a la conversación para atenderlo directamente.");
     return "Lamento el inconveniente. ¿Me cuentas brevemente qué pasó? Ya le aviso a alguien del equipo para que te ayude directamente.";
   }
 
@@ -275,13 +289,7 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
     s.slots.formal = formal;
     s.state = "HANDOFF";
     guardar(s);
-    const receptor = process.env.NUMERO_RECEPCION;
-    if (receptor) {
-      await enviarWhatsApp(
-        `whatsapp:${receptor}`,
-        `⚠️ Un cliente (${from.replace("whatsapp:", "")}) pidió hablar con una persona. Entra a la conversación de WhatsApp para atenderlo directamente — el bot ya no le va a responder en este chat.`
-      );
-    }
+    await avisarEscalacion(from.replace("whatsapp:", ""), "Un cliente pidió hablar con una persona. El bot ya no le va a responder en este chat.");
     return "¡Claro que sí! En un momento alguien de nuestro equipo te atiende directamente por aquí mismo.";
   }
 
@@ -403,13 +411,10 @@ async function procesarMensajePaciente(from, textoOriginal, profileName) {
       const s = sesionFresca(from);
       s.state = "HANDOFF";
       guardar(s);
-      const receptor = process.env.NUMERO_RECEPCION;
-      if (receptor) {
-        await enviarWhatsApp(
-          `whatsapp:${receptor}`,
-          `⚠️ Un cliente (${telefono}) quiere cambiar su cita del *${formatoLegible(citaExistente.fecha, citaExistente.hora)}*, que ya es en menos de 24h. Contáctalo directamente para resolverlo.`
-        );
-      }
+      await avisarEscalacion(
+        telefono,
+        `Un cliente quiere cambiar su cita del *${formatoLegible(citaExistente.fecha, citaExistente.hora)}*, que ya es en menos de 24h. Contáctalo directamente para resolverlo.`
+      );
       return `Tu cita es en menos de 24 horas, así que ese cambio lo tiene que ver directamente alguien del equipo — ya le avisé para que te contacte por aquí mismo.`;
     }
 
@@ -483,10 +488,14 @@ function registrarIntento(session, verdict) {
   session.attempts = verdict === "ACCEPT" ? 0 : (session.attempts || 0) + 1;
 }
 
-function manejarHandoffSiAplica(session) {
+async function manejarHandoffSiAplica(session) {
   if (session.attempts >= 3) {
     session.state = "HANDOFF";
     guardar(session);
+    await avisarEscalacion(
+      session.phone.replace("whatsapp:", ""),
+      "El bot no logró entenderse con un cliente después de varios intentos. Contáctalo directamente para ayudarlo con su cita."
+    );
     return "Disculpa, creo que no nos estamos entendiendo bien por aquí 😅 Ya le avisé a alguien del equipo para que te ayude directamente, muchas gracias por tu paciencia.";
   }
   return null;
@@ -509,7 +518,7 @@ async function manejarAskDate(session, extracted, texto) {
     return mensajeHoras(fechaISO, session.offered);
   }
 
-  const handoff = manejarHandoffSiAplica(session);
+  const handoff = await manejarHandoffSiAplica(session);
   if (handoff) return handoff;
 
   guardar(session);
@@ -561,7 +570,7 @@ async function manejarAskTime(session, extracted, texto) {
     return mensajeNombre();
   }
 
-  const handoff = manejarHandoffSiAplica(session);
+  const handoff = await manejarHandoffSiAplica(session);
   if (handoff) return handoff;
 
   guardar(session);
@@ -593,7 +602,7 @@ const REINTENTOS_NOMBRE = [
   "Disculpa, creo que no me llegó bien — ¿me compartes tu nombre completo una vez más, por favor?",
 ];
 
-function manejarAskName(session, extracted, texto) {
+async function manejarAskName(session, extracted, texto) {
   const nombreCrudo = (extracted && extracted.name) || texto;
   const { verdict, value } = nucleo.validarNombre(nombreCrudo);
 
@@ -606,7 +615,7 @@ function manejarAskName(session, extracted, texto) {
     return mensajeConfirmacion(session.slots);
   }
 
-  const handoff = manejarHandoffSiAplica(session);
+  const handoff = await manejarHandoffSiAplica(session);
   if (handoff) return handoff;
 
   guardar(session);
@@ -708,7 +717,7 @@ async function manejarCorreccion(session, extracted, texto) {
   // le pide a Claude que interprete el texto y explique con calidez qué tipo
   // de respuesta se espera, usando solo los datos reales ya decididos.
   registrarIntento(session, "CLARIFY");
-  const handoff = manejarHandoffSiAplica(session);
+  const handoff = await manejarHandoffSiAplica(session);
   if (handoff) return handoff;
   guardar(session);
 
