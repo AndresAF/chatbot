@@ -45,6 +45,7 @@ const turnosPendientes = {}; // { from: { textos, profileName, esRecepcion, time
 
 app.post("/webhook/whatsapp", (req, res) => {
   const from = req.body.From;
+  const to = req.body.To; // el número al que el cliente le escribió (sandbox o producción)
   const body = (req.body.Body || "").trim();
   const profileName = req.body.ProfileName;
   const messageSid = req.body.MessageSid;
@@ -58,9 +59,10 @@ app.post("/webhook/whatsapp", (req, res) => {
 
   const esRecepcion = NUMERO_RECEPCION && from === `whatsapp:${NUMERO_RECEPCION}`;
 
-  const pendiente = turnosPendientes[from] || { textos: [], profileName, esRecepcion };
+  const pendiente = turnosPendientes[from] || { textos: [], profileName, esRecepcion, to };
   pendiente.textos.push(body);
   pendiente.profileName = profileName || pendiente.profileName;
+  pendiente.to = to || pendiente.to;
   if (pendiente.timer) clearTimeout(pendiente.timer);
   pendiente.timer = setTimeout(() => procesarTurnoJuntado(from), DEBOUNCE_MS);
   turnosPendientes[from] = pendiente;
@@ -86,7 +88,11 @@ async function procesarTurnoJuntado(from) {
   }
 
   if (respuesta) {
-    const r = await enviarWhatsApp(from, respuesta);
+    // Se responde SIEMPRE desde el mismo número al que el cliente escribió
+    // (pendiente.to), nunca desde el default de TWILIO_WHATSAPP_FROM — si
+    // no coinciden (ej. el cliente le escribió al sandbox y esa env var
+    // apunta al número de producción, o viceversa), Twilio rechaza el envío.
+    const r = await enviarWhatsApp(from, respuesta, pendiente.to);
     if (!r.ok) console.error(`No se pudo entregar la respuesta a ${from} (falló el envío)`);
   }
 }

@@ -9,14 +9,21 @@ const twilioClient = process.env.TWILIO_ACCOUNT_SID
   ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
   : null;
 
-async function enviarWhatsApp(to, body) {
+// `from` es opcional — por defecto usa el número configurado en
+// TWILIO_WHATSAPP_FROM (para envíos proactivos: recordatorios, relevo de
+// recepción, avisos de handoff). Al RESPONDER a un mensaje entrante hay que
+// pasar explícitamente el número al que el cliente escribió (req.body.To),
+// para no depender de que esa env var coincida — si el cliente le escribió
+// al número de producción pero TWILIO_WHATSAPP_FROM apunta al sandbox (o
+// viceversa), Twilio rechaza el envío con el error 63015.
+async function enviarWhatsApp(to, body, from = process.env.TWILIO_WHATSAPP_FROM) {
   if (!twilioClient) {
-    console.log(`[SIMULADO -> ${to}]: ${body}`);
+    console.log(`[SIMULADO ${from || "(sin from)"} -> ${to}]: ${body}`);
     return { ok: true, simulado: true };
   }
   try {
     await twilioClient.messages.create({
-      from: process.env.TWILIO_WHATSAPP_FROM,
+      from,
       to,
       body,
     });
